@@ -1,0 +1,189 @@
+{
+  "domain": "domotica",
+  "domain_label": "home automation",
+  "templates": [
+    {
+      "id": "DOM-01",
+      "family": "conditional",
+      "pattern_label": "IF AND GT GT ON",
+      "slots": {
+        "dev": "device_switchable",
+        "m1": "metric_environment",
+        "m2": "metric_environment",
+        "t1": "value_pct",
+        "t2": "value_temp"
+      },
+      "ast": ["IF", ["AND", ["GT", "{m1}", "{t1}"], ["GT", "{m2}", "{t2}"]], ["ON", "{dev}"]],
+      "phrases": {
+        "it": "Accendi {dev} solo se {m1} supera {t1} e {m2} supera {t2}.",
+        "en": "Turn on {dev} only if {m1} exceeds {t1} and {m2} exceeds {t2}.",
+        "fr": "Allume {dev} uniquement si {m1} dépasse {t1} et si {m2} dépasse {t2}.",
+        "es": "Enciende {dev} solo si {m1} supera {t1} y {m2} supera {t2}.",
+        "de": "Schalte {dev} ein, nur wenn {m1} {t1} überschreitet und {m2} {t2} überschreitet."
+      }
+    },
+    {
+      "id": "DOM-02",
+      "family": "conditional",
+      "pattern_label": "UNLESS LT OFF",
+      "slots": {
+        "dev": "device_switchable",
+        "m": "metric_environment",
+        "t": "value_temp_low"
+      },
+      "ast": ["UNLESS", ["LT", "{m}", "{t}"], ["OFF", "{dev}"]],
+      "phrases": {
+        "it": "Spegni {dev} a meno che {m} non scenda sotto {t}.",
+        "en": "Turn off {dev} unless {m} drops below {t}.",
+        "fr": "Eteins {dev} sauf si {m} descend sous {t}.",
+        "es": "Apaga {dev} salvo si {m} baja de {t}.",
+        "de": "Schalte {dev} aus, außer wenn {m} unter {t} fällt."
+      }
+    },
+    {
+      "id": "DOM-03",
+      "family": "recurrence",
+      "pattern_label": "EVERY_N_DAYS AT ON",
+      "slots": {
+        "dev": "device_switchable",
+        "n": "count_days_short",
+        "time": "clock_time"
+      },
+      "ast": ["EVERY_N_DAYS", "{n}", ["AT", "{time}", ["ON", "{dev}"]]],
+      "phrases": {
+        "it": "Ogni {n}, {time}, accendi {dev}.",
+        "en": "Every {n}, {time}, turn on {dev}.",
+        "fr": "Tous les {n}, {time}, allume {dev}.",
+        "es": "Cada {n}, {time}, enciende {dev}.",
+        "de": "Alle {n}, {time}, schalte {dev} ein."
+      }
+    },
+    {
+      "id": "DOM-04",
+      "family": "recurrence",
+      "pattern_label": "WEEKDAY_ORD SET",
+      "slots": {
+        "dev": "device_switchable",
+        "k": "ordinal_k",
+        "dow": "weekday",
+        "v": "value_pct"
+      },
+      "ast": ["WEEKDAY_ORD", "{k}", "{dow}", ["SET", "{dev}", "{v}"]],
+      "phrases": {
+        "it": "Ogni {k} {dow} del mese imposta {dev} su {v}.",
+        "en": "Every {k} {dow} of the month, set {dev} to {v}.",
+        "fr": "Chaque {k} {dow} du mois, règle {dev} sur {v}.",
+        "es": "El {k} {dow} de cada mes, configura {dev} a {v}.",
+        "de": "Jeden {k}. {dow} des Monats stelle {dev} auf {v}."
+      }
+    },
+    {
+      "id": "DOM-05",
+      "family": "recurrence",
+      "pattern_label": "IF STATE DAILY_AT OFF",
+      "slots": {
+        "dev": "device_switchable",
+        "s": "state_clause",
+        "time": "clock_time"
+      },
+      "ast": ["IF", ["STATE", "{s}"], ["DAILY_AT", "{time}", ["OFF", "{dev}"]]],
+      "phrases": {
+        "it": "Ogni giorno {time} spegni {dev} se {s}.",
+        "en": "Every day {time} turn off {dev} if {s}.",
+        "fr": "Chaque jour {time} éteins {dev} si {s}.",
+        "es": "Todos los días {time} apaga {dev} si {s}.",
+        "de": "Jeden Tag {time} schalte {dev} aus, wenn {s}."
+      }
+    },
+    {
+      "id": "DOM-06",
+      "family": "frequency",
+      "pattern_label": "IN_BAND OCCASIONAL RUN",
+      "slots": {
+        "dev": "device_switchable",
+        "band": "time_band"
+      },
+      "ast": ["IN_BAND", "{band}", ["OCCASIONAL", ["RUN", "{dev}"]]],
+      "phrases": {
+        "it": "Di tanto in tanto, {band}, fai funzionare {dev}.",
+        "en": "Now and then, {band}, run {dev}.",
+        "fr": "De temps en temps, {band}, fais fonctionner {dev}.",
+        "es": "De vez en cuando, {band}, pon en marcha {dev}.",
+        "de": "Gelegentlich, {band}, lass {dev} laufen."
+      }
+    },
+    {
+      "id": "DOM-07",
+      "family": "threshold",
+      "pattern_label": "IF GTE SUM_SPENT LAST_N_DAYS ALERT",
+      "slots": {
+        "n": "count_days_short",
+        "v": "value_kwh",
+        "alert": "alert_channel"
+      },
+      "ast": ["IF", ["GTE", ["SUM_SPENT", "power_consumption", ["LAST_N_DAYS", "{n}"]], "{v}"], ["ALERT", "{alert}"]],
+      "phrases": {
+        "it": "Se il consumo di corrente degli ultimi {n} supera {v}, mandami {alert}.",
+        "en": "If the power draw of the last {n} exceeds {v}, send me {alert}.",
+        "fr": "Si la consommation électrique sur {n} dépasse {v}, envoie-moi {alert}.",
+        "es": "Si el consumo eléctrico de los últimos {n} supera {v}, mándame {alert}.",
+        "de": "Wenn der Stromverbrauch der letzten {n} {v} überschreitet, schick mir {alert}."
+      }
+    },
+    {
+      "id": "DOM-08",
+      "family": "threshold",
+      "pattern_label": "IF BETWEEN OFF",
+      "slots": {
+        "dev": "device_switchable",
+        "m": "metric_environment",
+        "pair": "value_temp_pair"
+      },
+      "ast": ["IF", ["BETWEEN", "{m}", "{pair.value}", "{pair.second}"], ["OFF", "{dev}"]],
+      "phrases": {
+        "it": "Se {m} è nell'intervallo tra {pair.value} e {pair.second}, spegni {dev}.",
+        "en": "If {m} is in the range between {pair.value} and {pair.second}, turn off {dev}.",
+        "fr": "Si {m} est dans la plage entre {pair.value} et {pair.second}, éteins {dev}.",
+        "es": "Si {m} está en el rango entre {pair.value} y {pair.second}, apaga {dev}.",
+        "de": "Wenn {m} im Bereich zwischen {pair.value} und {pair.second} liegt, schalte {dev} aus."
+      }
+    },
+    {
+      "id": "DOM-09",
+      "family": "threshold",
+      "pattern_label": "IF NOT GT OFF",
+      "slots": {
+        "m": "metric_environment",
+        "v": "value_pct_low",
+        "dev": "device_switchable"
+      },
+      "ast": ["IF", ["NOT", ["GT", "{m}", "{v}"]], ["OFF", "{dev}"]],
+      "phrases": {
+        "it": "Se {m} non supera {v}, spegni {dev}.",
+        "en": "If {m} does not exceed {v}, turn off {dev}.",
+        "fr": "Si {m} ne dépasse pas {v}, éteins {dev}.",
+        "es": "Si {m} no supera {v}, apaga {dev}.",
+        "de": "Wenn {m} {v} nicht übersteigt, schalte {dev} aus."
+      }
+    },
+    {
+      "id": "DOM-10",
+      "family": "threshold",
+      "pattern_label": "IF AND GTE LTE OR ON ON",
+      "slots": {
+        "m": "metric_environment",
+        "pair": "value_pct_pair",
+        "dev": "device_switchable",
+        "dev2": "device_switchable"
+      },
+      "ast": ["IF", ["AND", ["GTE", "{m}", "{pair.value}"], ["LTE", "{m}", "{pair.second}"]], ["OR", ["ON", "{dev}"], ["ON", "{dev2}"]]],
+      "phrases": {
+        "it": "Se {m} resta tra {pair.value} e {pair.second}, accendi {dev} oppure {dev2}.",
+        "en": "If {m} stays between {pair.value} and {pair.second}, turn on {dev} or {dev2}.",
+        "fr": "Si {m} reste entre {pair.value} et {pair.second}, allume {dev} ou {dev2}.",
+        "es": "Si {m} se mantiene entre {pair.value} y {pair.second}, enciende {dev} o {dev2}.",
+        "de": "Wenn {m} zwischen {pair.value} und {pair.second} liegt, schalte {dev} oder {dev2} ein."
+      }
+    }
+  ]
+}

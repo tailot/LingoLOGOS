@@ -1,0 +1,185 @@
+{
+  "domain": "produttivita",
+  "domain_label": "digital housekeeping and focus",
+  "templates": [
+    {
+      "id": "PRO-01",
+      "family": "recurrence",
+      "pattern_label": "IF STATE DAILY_AT RUN",
+      "slots": {
+        "job": "it_job",
+        "time": "clock_time"
+      },
+      "ast": ["IF", ["STATE", "computer_plugged_in"], ["DAILY_AT", "{time}", ["RUN", "{job}"]]],
+      "phrases": {
+        "it": "Esegui {job} ogni giorno {time} se il computer è collegato alla corrente.",
+        "en": "Run {job} every day {time} if the computer is plugged in.",
+        "fr": "Lance {job} chaque jour {time} si l'ordinateur est sur secteur.",
+        "es": "Ejecuta {job} todos los días {time} si el ordenador está conectado a la corriente.",
+        "de": "Führe {job} jeden Tag {time} aus, wenn der Rechner am Strom angeschlossen ist."
+      }
+    },
+    {
+      "id": "PRO-02",
+      "family": "recurrence",
+      "pattern_label": "EVERY_N_DAYS ARCHIVE OLDER_THAN",
+      "slots": {
+        "kind": "file_kind",
+        "n": "count_days_short",
+        "n2": "count_days_long"
+      },
+      "ast": ["EVERY_N_DAYS", "{n}", ["ARCHIVE", "{kind}", ["OLDER_THAN", "{n2}"]]],
+      "phrases": {
+        "it": "Ogni {n} archivia {kind} che superano {n2}.",
+        "en": "Every {n} archive {kind} older than {n2}.",
+        "fr": "Tous les {n} archive {kind} de plus de {n2}.",
+        "es": "Cada {n} archiva {kind} con más de {n2}.",
+        "de": "Alle {n} archiviere {kind}, die älter als {n2} sind."
+      }
+    },
+    {
+      "id": "PRO-03",
+      "family": "threshold",
+      "pattern_label": "IF GT COUNT LAST_N_DAYS DELETE",
+      "slots": {
+        "kind": "file_kind",
+        "n": "count_days_short",
+        "c": "count_small"
+      },
+      "ast": ["IF", ["GT", ["COUNT", "{kind}", ["LAST_N_DAYS", "{n}"]], "{c}"], ["DELETE", "{kind}"]],
+      "phrases": {
+        "it": "Se negli ultimi {n} superi {c} {kind}, elimina {kind}.",
+        "en": "If you collect more than {c} {kind} in the last {n}, delete {kind}.",
+        "fr": "Si tu collectes plus de {c} {kind} sur {n}, supprime {kind}.",
+        "es": "Si acumulas más de {c} {kind} en los últimos {n}, elimina {kind}.",
+        "de": "Wenn du innerhalb der letzten {n} mehr als {c} {kind} ansammelst, lösch {kind}."
+      }
+    },
+    {
+      "id": "PRO-04",
+      "family": "conditional",
+      "pattern_label": "UNLESS STATE SKIP",
+      "slots": {
+        "job": "it_job",
+        "s": "state_clause"
+      },
+      "ast": ["UNLESS", ["STATE", "{s}"], ["SKIP", "{job}"]],
+      "phrases": {
+        "it": "A meno che {s|sub}, salta {job}.",
+        "en": "Unless {s}, skip {job}.",
+        "fr": "Sauf si {s}, saute {job}.",
+        "es": "Salvo si {s}, omite {job}.",
+        "de": "Außer wenn {s}, überspringe {job}."
+      }
+    },
+    {
+      "id": "PRO-05",
+      "family": "threshold",
+      "pattern_label": "IF GTE USED_PCT RUN",
+      "slots": {
+        "job": "it_job",
+        "v": "storage_level"
+      },
+      "ast": ["IF", ["GTE", ["USED_PCT", "disk"], "{v}"], ["RUN", "{job}"]],
+      "phrases": {
+        "it": "Esegui {job} quando lo spazio su disco usato raggiunge {v}.",
+        "en": "Run {job} when used disk space reaches {v}.",
+        "fr": "Lance {job} quand l'espace disque utilisé atteint {v}.",
+        "es": "Ejecuta {job} cuando el espacio en disco usado alcanza {v}.",
+        "de": "Führe {job} aus, wenn der belegte Speicherplatz {v} erreicht."
+      }
+    },
+    {
+      "id": "PRO-06",
+      "family": "frequency",
+      "pattern_label": "IN_BAND OFTEN FOCUS",
+      "slots": {
+        "task": "agenda_task",
+        "band": "time_band"
+      },
+      "ast": ["IN_BAND", "{band}", ["OFTEN", ["FOCUS", "{task}"]]],
+      "phrases": {
+        "it": "{band} controlla spesso {task}.",
+        "en": "{band} check {task} often.",
+        "fr": "{band} vérifie souvent {task}.",
+        "es": "{band} revisa con frecuencia {task}.",
+        "de": "{band} prüfe häufig {task}."
+      }
+    },
+    {
+      "id": "PRO-07",
+      "family": "recurrence",
+      "pattern_label": "WEEKDAY_ON SYNC",
+      "slots": {
+        "job": "it_job",
+        "dow": "weekday"
+      },
+      "ast": ["WEEKDAY_ON", "{dow}", ["SYNC", "{job}"]],
+      "phrases": {
+        "it": "Ogni {dow} esegui {job}.",
+        "en": "Every {dow} run {job}.",
+        "fr": "Chaque {dow} lance {job}.",
+        "es": "Cada {dow} ejecuta {job}.",
+        "de": "Jeden {dow} führe {job} durch."
+      }
+    },
+    {
+      "id": "PRO-08",
+      "family": "conditional",
+      "pattern_label": "EXCEPT STATE DAILY_AT RUN",
+      "slots": {
+        "job": "it_job",
+        "time": "clock_time",
+        "s": "state_clause"
+      },
+      "ast": ["EXCEPT", ["STATE", "{s}"], ["DAILY_AT", "{time}", ["RUN", "{job}"]]],
+      "phrases": {
+        "it": "Ogni giorno {time} esegui {job}, tranne quando {s}.",
+        "en": "Every day {time} run {job}, except when {s}.",
+        "fr": "Chaque jour {time} lance {job}, sauf si {s}.",
+        "es": "Todos los días {time} ejecuta {job}, salvo si {s}.",
+        "de": "Jeden Tag {time} führe {job} durch, außer wenn {s}."
+      }
+    },
+    {
+      "id": "PRO-09",
+      "family": "recurrence",
+      "pattern_label": "AND DAILY_AT SYNC WEEKDAY_ON ARCHIVE",
+      "slots": {
+        "job": "it_job",
+        "time": "clock_time",
+        "dow": "weekday",
+        "kind": "file_kind",
+        "n": "count_days_long"
+      },
+      "ast": ["AND", ["DAILY_AT", "{time}", ["SYNC", "{job}"]], ["WEEKDAY_ON", "{dow}", ["ARCHIVE", "{kind}", ["OLDER_THAN", "{n}"]]]],
+      "phrases": {
+        "it": "Ogni giorno {time} sincronizza {job} e ogni {dow} archivia {kind} che superano {n}.",
+        "en": "Every day {time} sync {job} and every {dow} archive {kind} older than {n}.",
+        "fr": "Chaque jour {time} synchronise {job} et chaque {dow} archive {kind} de plus de {n}.",
+        "es": "Todos los días {time} sincroniza {job} y cada {dow} archiva {kind} con más de {n}.",
+        "de": "Jeden Tag {time} synchronisiere {job} und jeden {dow} archiviere {kind}, die älter sind als {n}."
+      }
+    },
+    {
+      "id": "PRO-10",
+      "family": "threshold",
+      "pattern_label": "IF OR GTE USED_PCT GT COUNT LAST_N_DAYS RUN",
+      "slots": {
+        "job": "it_job",
+        "v": "storage_level",
+        "kind": "file_kind",
+        "n": "count_days_short",
+        "c": "count_small"
+      },
+      "ast": ["IF", ["OR", ["GTE", ["USED_PCT", "disk"], "{v}"], ["GT", ["COUNT", "{kind}", ["LAST_N_DAYS", "{n}"]], "{c}"]], ["RUN", "{job}"]],
+      "phrases": {
+        "it": "Esegui {job} se lo spazio su disco usato raggiunge {v} o se negli ultimi {n} superi {c} {kind}.",
+        "en": "Run {job} if used disk space reaches {v} or if you collect more than {c} {kind} in the last {n}.",
+        "fr": "Lance {job} quand l'espace disque utilisé atteint {v} ou quand tu collectes plus de {c} {kind} sur {n}.",
+        "es": "Ejecuta {job} si el espacio en disco usado alcanza {v} o si acumulas más de {c} {kind} en los últimos {n}.",
+        "de": "Führe {job} aus, wenn der belegte Speicherplatz {v} erreicht oder wenn du innerhalb der letzten {n} mehr als {c} {kind} ansammelst."
+      }
+    }
+  ]
+}

@@ -6,5 +6,10 @@ __pycache__/
 build/
 dist/
 
-# Nested git repository with the synthetic training corpus (own history, own hub remote)
-dataset/
+# Dataset companion folder: corpus and tools are versioned here,
+# training outputs stay local.
+dataset/checkpoints/
+dataset/_smoke/
+.venv*/
+venv/
+

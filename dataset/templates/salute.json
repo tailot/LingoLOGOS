@@ -1,0 +1,192 @@
+{
+  "domain": "salute",
+  "domain_label": "health and wellbeing",
+  "templates": [
+    {
+      "id": "SAL-01",
+      "family": "recurrence",
+      "pattern_label": "EVERY_N_HOURS IF STATE REMIND",
+      "slots": {
+        "med": "medication",
+        "h": "count_hours"
+      },
+      "ast": ["EVERY_N_HOURS", "{h}", ["IF", ["STATE", "stomach_full"], ["REMIND", "{med}"]]],
+      "phrases": {
+        "it": "Ogni {h}, a stomaco pieno, ricordami di prendere {med}.",
+        "en": "Every {h}, on a full stomach, remind me to take {med}.",
+        "fr": "Toutes les {h}, l'estomac plein, rappelle-moi de prendre {med}.",
+        "es": "Cada {h}, con el estómago lleno, recuérdame tomar {med}.",
+        "de": "Alle {h} erinnere mich daran, wenn der Magen voll ist, {med} einzunehmen."
+      }
+    },
+    {
+      "id": "SAL-02",
+      "family": "recurrence",
+      "pattern_label": "EVERY_N_DAYS MEASURE",
+      "slots": {
+        "ind": "health_indicator",
+        "n": "count_days_short"
+      },
+      "ast": ["EVERY_N_DAYS", "{n}", ["MEASURE", "{ind}"]],
+      "phrases": {
+        "it": "Ogni {n} misura {ind}.",
+        "en": "Every {n} measure {ind}.",
+        "fr": "Tous les {n} mesure {ind}.",
+        "es": "Cada {n} mide {ind}.",
+        "de": "Alle {n} miss {ind|acc}."
+      }
+    },
+    {
+      "id": "SAL-03",
+      "family": "threshold",
+      "pattern_label": "IF GT INDICATOR THRESHOLD ALERT",
+      "slots": {
+        "ind": "health_indicator",
+        "alert": "alert_channel"
+      },
+      "derived": {
+        "thr": { "from": "ind", "field": "thresholds" }
+      },
+      "ast": ["IF", ["GT", "{ind}", "{thr}"], ["ALERT", "{alert}"]],
+      "phrases": {
+        "it": "Se {ind} supera {thr}, mandami {alert}.",
+        "en": "If {ind} exceeds {thr}, send me {alert}.",
+        "fr": "Si {ind} dépasse {thr}, envoie-moi {alert}.",
+        "es": "Si {ind} supera {thr}, mándame {alert}.",
+        "de": "Wenn {ind} {thr} überschreitet, schick mir {alert}."
+      }
+    },
+    {
+      "id": "SAL-04",
+      "family": "threshold",
+      "pattern_label": "IF LT INDICATOR THRESHOLD ALERT",
+      "slots": {
+        "ind": "health_indicator",
+        "alert": "alert_channel"
+      },
+      "derived": {
+        "thr": { "from": "ind", "field": "thresholds" }
+      },
+      "ast": ["IF", ["LT", "{ind}", "{thr}"], ["ALERT", "{alert}"]],
+      "phrases": {
+        "it": "Se {ind} scende sotto {thr}, mandami {alert}.",
+        "en": "If {ind} drops below {thr}, send me {alert}.",
+        "fr": "Si {ind} descend sous {thr}, envoie-moi {alert}.",
+        "es": "Si {ind} baja de {thr}, mándame {alert}.",
+        "de": "Wenn {ind} unter {thr} fällt, schick mir {alert}."
+      }
+    },
+    {
+      "id": "SAL-05",
+      "family": "recurrence",
+      "pattern_label": "IN_BAND DO DURATION",
+      "slots": {
+        "act": "activity_kind",
+        "band": "time_band",
+        "min": "count_minutes"
+      },
+      "ast": ["IN_BAND", "{band}", ["DO", "{act}", "{min}"]],
+      "phrases": {
+        "it": "{band} fai {act} per {min}.",
+        "en": "{band} do {act} for {min}.",
+        "fr": "{band} fais {act} pendant {min}.",
+        "es": "{band} haz {act} durante {min}.",
+        "de": "{band} mache {act} von {min}."
+      }
+    },
+    {
+      "id": "SAL-06",
+      "family": "conditional",
+      "pattern_label": "UNLESS STATE SKIP",
+      "slots": {
+        "act": "activity_kind",
+        "s": "state_clause"
+      },
+      "ast": ["UNLESS", ["STATE", "{s}"], ["SKIP", "{act}"]],
+      "phrases": {
+        "it": "A meno che {s|sub}, salta {act}.",
+        "en": "Unless {s}, skip {act}.",
+        "fr": "Sauf si {s}, renonce à {act}.",
+        "es": "Salvo si {s}, salta {act}.",
+        "de": "Außer wenn {s}, überspringe {act}."
+      }
+    },
+    {
+      "id": "SAL-07",
+      "family": "recurrence",
+      "pattern_label": "WEEKDAY_ON DO DURATION",
+      "slots": {
+        "act": "activity_kind",
+        "dow": "weekday",
+        "min": "count_minutes"
+      },
+      "ast": ["WEEKDAY_ON", "{dow}", ["DO", "{act}", "{min}"]],
+      "phrases": {
+        "it": "Il {dow} fai {act} per {min}.",
+        "en": "On {dow} do {act} for {min}.",
+        "fr": "Le {dow} fais {act} pendant {min}.",
+        "es": "El {dow} haz {act} durante {min}.",
+        "de": "Am {dow} mache {act} von {min}."
+      }
+    },
+    {
+      "id": "SAL-08",
+      "family": "conditional",
+      "pattern_label": "EXCEPT STATE EVERY_N_DAYS PREPARE",
+      "slots": {
+        "med": "medication",
+        "n": "count_days_short",
+        "s": "state_clause"
+      },
+      "ast": ["EXCEPT", ["STATE", "{s}"], ["EVERY_N_DAYS", "{n}", ["PREPARE", "{med}"]]],
+      "phrases": {
+        "it": "Ogni {n} prepara {med}, tranne quando {s}.",
+        "en": "Every {n} prepare {med}, except when {s}.",
+        "fr": "Tous les {n} prépare {med}, sauf si {s}.",
+        "es": "Cada {n} prepara {med}, salvo si {s}.",
+        "de": "Alle {n} bereite {med} vor, außer wenn {s}."
+      }
+    },
+    {
+      "id": "SAL-09",
+      "family": "recurrence",
+      "pattern_label": "EVERY_N_DAYS AND MEASURE ALERT",
+      "slots": {
+        "ind": "health_indicator",
+        "n": "count_days_short",
+        "alert": "alert_channel"
+      },
+      "ast": ["EVERY_N_DAYS", "{n}", ["AND", ["MEASURE", "{ind}"], ["ALERT", "{alert}"]]],
+      "phrases": {
+        "it": "Ogni {n} misura {ind} e mandami {alert}.",
+        "en": "Every {n} measure {ind} and send me {alert}.",
+        "fr": "Tous les {n} mesure {ind} et envoie-moi {alert}.",
+        "es": "Cada {n} mide {ind} y mándame {alert}.",
+        "de": "Alle {n} miss {ind|acc} und schick mir {alert}."
+      }
+    },
+    {
+      "id": "SAL-10",
+      "family": "threshold",
+      "pattern_label": "AT IF OR LT NOT GTE REMIND",
+      "slots": {
+        "ind": "health_indicator",
+        "ind2": "health_indicator",
+        "med": "medication",
+        "time": "clock_time"
+      },
+      "derived": {
+        "thr": { "from": "ind", "field": "thresholds" },
+        "thr2": { "from": "ind2", "field": "thresholds" }
+      },
+      "ast": ["AT", "{time}", ["IF", ["OR", ["LT", "{ind}", "{thr}"], ["NOT", ["GTE", "{ind2}", "{thr2}"]]], ["REMIND", "{med}"]]],
+      "phrases": {
+        "it": "{time} ricordami di prendere {med} se {ind} scende sotto {thr} o se {ind2} non supera {thr2}.",
+        "en": "{time} remind me to take {med} if {ind} drops below {thr} or {ind2} does not exceed {thr2}.",
+        "fr": "{time} rappelle-moi de prendre {med} si {ind} descend sous {thr} ou si {ind2} ne dépasse pas {thr2}.",
+        "es": "{time} recuérdame tomar {med} si {ind} baja de {thr} o si {ind2} no supera {thr2}.",
+        "de": "{time} erinnere mich, {med} einzunehmen, wenn {ind} unter {thr} fällt oder {ind2} {thr2} nicht übersteigt."
+      }
+    }
+  ]
+}

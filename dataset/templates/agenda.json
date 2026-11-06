@@ -1,0 +1,184 @@
+{
+  "domain": "agenda",
+  "domain_label": "calendar and reminders",
+  "templates": [
+    {
+      "id": "AG-01",
+      "family": "recurrence",
+      "pattern_label": "WEEKDAY_ORD AT SCHEDULE",
+      "slots": {
+        "meeting": "meeting_kind",
+        "k": "ordinal_k",
+        "dow": "weekday",
+        "time": "clock_time"
+      },
+      "ast": ["WEEKDAY_ORD", "{k}", "{dow}", ["AT", "{time}", ["SCHEDULE", "{meeting}"]]],
+      "phrases": {
+        "it": "Pianifica {meeting} ogni {k} {dow} del mese {time}.",
+        "en": "Schedule {meeting} every {k} {dow} of the month {time}.",
+        "fr": "Planifie {meeting} chaque {k} {dow} du mois {time}.",
+        "es": "Programa {meeting} el {k} {dow} de cada mes {time}.",
+        "de": "Plane {meeting} jeden {k}. {dow} des Monats {time}."
+      }
+    },
+    {
+      "id": "AG-02",
+      "family": "recurrence",
+      "pattern_label": "EVERY_N_DAYS REMIND",
+      "slots": {
+        "task": "agenda_task",
+        "n": "count_days_short"
+      },
+      "ast": ["EVERY_N_DAYS", "{n}", ["REMIND", "{task}"]],
+      "phrases": {
+        "it": "Ogni {n} ricordami {task}.",
+        "en": "Remind me about {task} every {n}.",
+        "fr": "Rappelle-moi {task} tous les {n}.",
+        "es": "Recuérdame {task} cada {n}.",
+        "de": "Alle {n} erinnere mich an {task}."
+      }
+    },
+    {
+      "id": "AG-03",
+      "family": "conditional",
+      "pattern_label": "IF STATE RESCHEDULE NEXT_DAY",
+      "slots": {
+        "meeting": "meeting_kind",
+        "s": "state_clause"
+      },
+      "ast": ["IF", ["STATE", "{s}"], ["RESCHEDULE", "{meeting}", "next_day"]],
+      "phrases": {
+        "it": "Se {s}, sposta {meeting} al giorno dopo.",
+        "en": "If {s}, move {meeting} to the next day.",
+        "fr": "Si {s}, déplace {meeting} au lendemain.",
+        "es": "Si {s}, mueve {meeting} al día siguiente.",
+        "de": "Wenn {s}, verschiebe {meeting} auf den nächsten Tag."
+      }
+    },
+    {
+      "id": "AG-04",
+      "family": "conditional",
+      "pattern_label": "UNLESS PUBLIC_HOLIDAY DAILY_AT REMIND",
+      "slots": {
+        "task": "agenda_task",
+        "time": "clock_time"
+      },
+      "ast": ["UNLESS", ["STATE", "public_holiday"], ["DAILY_AT", "{time}", ["REMIND", "{task}"]]],
+      "phrases": {
+        "it": "A meno che non sia festivo, {time} ricordami {task}.",
+        "en": "Unless it is a public holiday, {time} remind me about {task}.",
+        "fr": "Sauf si c'est un jour férié, {time} rappelle-moi {task}.",
+        "es": "Salvo si es festivo, {time} recuérdame {task}.",
+        "de": "Außer wenn ein Feiertag ist, erinnere mich {time} an {task}."
+      }
+    },
+    {
+      "id": "AG-05",
+      "family": "conditional",
+      "pattern_label": "EXCEPT STATE EVERY_N_DAYS REMIND",
+      "slots": {
+        "task": "agenda_task",
+        "n": "count_days_short",
+        "s": "state_clause"
+      },
+      "ast": ["EXCEPT", ["STATE", "{s}"], ["EVERY_N_DAYS", "{n}", ["REMIND", "{task}"]]],
+      "phrases": {
+        "it": "Ogni {n} ricordami {task}, tranne quando {s}.",
+        "en": "Every {n} remind me about {task}, except when {s}.",
+        "fr": "Tous les {n} rappelle-moi {task}, sauf si {s}.",
+        "es": "Cada {n} recuérdame {task}, salvo si {s}.",
+        "de": "Alle {n} erinnere mich an {task}, außer wenn {s}."
+      }
+    },
+    {
+      "id": "AG-06",
+      "family": "frequency",
+      "pattern_label": "OCCASIONAL MOVE OTHER_SLOT",
+      "slots": {
+        "meeting": "meeting_kind"
+      },
+      "ast": ["OCCASIONAL", ["MOVE", "{meeting}", "other_slot"]],
+      "phrases": {
+        "it": "Di tanto in tanto sposta {meeting} in un altro momento.",
+        "en": "Now and then move {meeting} to another slot.",
+        "fr": "De temps en temps déplace {meeting} à un autre créneau.",
+        "es": "De vez en cuando mueve {meeting} a otra franja.",
+        "de": "Gelegentlich verschiebe {meeting} auf einen anderen Termin."
+      }
+    },
+    {
+      "id": "AG-07",
+      "family": "threshold",
+      "pattern_label": "IF GT COUNT NEXT_N_DAYS ALERT",
+      "slots": {
+        "n": "count_days_short",
+        "c": "count_small",
+        "alert": "alert_channel"
+      },
+      "ast": ["IF", ["GT", ["COUNT", "meeting", ["NEXT_N_DAYS", "{n}"]], "{c}"], ["ALERT", "{alert}"]],
+      "phrases": {
+        "it": "Se nei prossimi {n} ho più di {c} riunioni, mandami {alert}.",
+        "en": "If I have more than {c} meetings in the next {n}, send me {alert}.",
+        "fr": "Si j'ai plus de {c} réunions dans les {n} à venir, envoie-moi {alert}.",
+        "es": "Si en los próximos {n} tengo más de {c} reuniones, mándame {alert}.",
+        "de": "Wenn ich innerhalb der nächsten {n} mehr als {c} Meetings habe, schick mir {alert}."
+      }
+    },
+    {
+      "id": "AG-08",
+      "family": "recurrence",
+      "pattern_label": "WEEKDAY_ORD_LAST REVIEW",
+      "slots": {
+        "task": "agenda_task",
+        "dow": "weekday",
+        "k": "ordinal_last"
+      },
+      "ast": ["WEEKDAY_ORD", "{k}", "{dow}", ["REVIEW", "{task}"]],
+      "phrases": {
+        "it": "Verifica {task} ogni {k} {dow} del mese.",
+        "en": "Verify {task} every {k} {dow} of the month.",
+        "fr": "Vérifie {task} chaque {k} {dow} du mois.",
+        "es": "Verifica {task} el {k} {dow} de cada mes.",
+        "de": "Prüfe {task} jeden {k} {dow} des Monats."
+      }
+    },
+    {
+      "id": "AG-09",
+      "family": "recurrence",
+      "pattern_label": "EVERY_WEEK AT IF STATE REMIND",
+      "slots": {
+        "task": "agenda_task",
+        "dow": "weekday",
+        "time": "clock_time",
+        "s": "state_clause"
+      },
+      "ast": ["EVERY_WEEK", "{dow}", ["AT", "{time}", ["IF", ["STATE", "{s}"], ["REMIND", "{task}"]]]],
+      "phrases": {
+        "it": "Ogni {dow} {time} ricordami {task} se {s}.",
+        "en": "Every {dow} {time} remind me about {task} if {s}.",
+        "fr": "Chaque {dow} {time} rappelle-moi {task} si {s}.",
+        "es": "Cada {dow} {time} recuérdame {task} si {s}.",
+        "de": "Jeden {dow} {time} erinnere mich an {task}, wenn {s}."
+      }
+    },
+    {
+      "id": "AG-10",
+      "family": "conditional",
+      "pattern_label": "IF OR STATE GT COUNT NEXT_N_DAYS SKIP",
+      "slots": {
+        "task": "agenda_task",
+        "s": "state_clause",
+        "n": "count_days_short",
+        "c": "count_small"
+      },
+      "ast": ["IF", ["OR", ["STATE", "{s}"], ["GT", ["COUNT", "meeting", ["NEXT_N_DAYS", "{n}"]], "{c}"]], ["SKIP", "{task}"]],
+      "phrases": {
+        "it": "Se {s} o se nei prossimi {n} hai più di {c} appuntamenti, salta {task}.",
+        "en": "If {s} or if you have more than {c} meetings in the next {n}, skip {task}.",
+        "fr": "Si {s} ou si tu as plus de {c} réunions dans les {n} à venir, saute {task}.",
+        "es": "Si {s} o si tienes más de {c} reuniones en los próximos {n}, omite {task}.",
+        "de": "Wenn {s} oder wenn du innerhalb der nächsten {n} mehr als {c} Termine hast, überspringe {task}."
+      }
+    }
+  ]
+}

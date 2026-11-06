@@ -1,0 +1,17 @@
+{
+  "name": "all",
+  "version": "1.0.0",
+  "description": "All five languages, parallel groups kept inside one split.",
+  "languages": [
+    "it",
+    "en",
+    "fr",
+    "es",
+    "de"
+  ],
+  "data_files": {
+    "train": "data/*/train-*.jsonl",
+    "valid": "data/*/valid-*.jsonl",
+    "test": "data/*/test-*.jsonl"
+  }
+}

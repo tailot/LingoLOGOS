@@ -1,0 +1,13 @@
+{
+  "name": "de",
+  "version": "1.0.0",
+  "description": "Items of one language.",
+  "languages": [
+    "de"
+  ],
+  "data_files": {
+    "train": "data/de/train-*.jsonl",
+    "valid": "data/de/valid-*.jsonl",
+    "test": "data/de/test-*.jsonl"
+  }
+}

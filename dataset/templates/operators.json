@@ -1,0 +1,89 @@
+{
+  "meta": {
+    "name": "LingoLOGOS canonical operator registry",
+    "description": "Closed set of logical operators used by every template. Each operator maps to a Grammatical Framework constructor and to an SMT-LIB shape for Z3. Operators always render inside round brackets in the bracket algebra; value and entity leaves render inside square brackets, so the bracket sequence of every item is a word of Dyck-2 over the four terminals the project engine induces.",
+    "start_symbol": "S",
+    "nonterminals": ["S", "OPN_R", "CLS_R", "OPN_S", "CLS_S"],
+    "bracket_roles": {
+      "round": "operator or logic node (OPN_R / CLS_R)",
+      "square": "value, entity or clause leaf (OPN_S / CLS_S)"
+    },
+    "ast_conventions": {
+      "list_starting_with_UPPERCASE_name": "operator node",
+      "UPPERCASE_name_alone": "operator node with no further nesting",
+      "brace_reference": "slot reference, for example {dev} or {pair.value} or {ind|acc}",
+      "lowercase_string": "literal leaf token",
+      "resolved_leaf": "square-bracket node holding only lowercase or numeric tokens"
+    }
+  },
+  "operators": {
+    "IF": { "arity": 2, "category": "conditional", "family": "conditional", "gf": "Cond", "smt": "(implies <cond> <action>)" },
+    "UNLESS": { "arity": 2, "category": "conditional", "family": "conditional", "gf": "UnlessCond", "smt": "(implies (not <cond>) <action>)" },
+    "EXCEPT": { "arity": 2, "category": "conditional", "family": "conditional", "gf": "ExceptCond", "smt": "(implies (not <cond>) <recurrence>)" },
+    "AND": { "arity": 2, "category": "logic", "family": "conditional", "gf": "AndCond", "smt": "(and <a> <b>)" },
+    "OR": { "arity": 2, "category": "logic", "family": "conditional", "gf": "OrCond", "smt": "(or <a> <b>)" },
+    "NOT": { "arity": 1, "category": "logic", "family": "conditional", "gf": "NegCond", "smt": "(not <a>)" },
+    "STATE": { "arity": 1, "category": "predicate", "family": "conditional", "gf": "StateC", "smt": "<bool-var>" },
+
+    "GT": { "arity": 2, "category": "threshold", "family": "threshold", "gf": "GtC", "smt": "(> <lhs> <rhs>)" },
+    "GTE": { "arity": 2, "category": "threshold", "family": "threshold", "gf": "GtEqC", "smt": "(>= <lhs> <rhs>)" },
+    "LT": { "arity": 2, "category": "threshold", "family": "threshold", "gf": "LtC", "smt": "(< <lhs> <rhs>)" },
+    "LTE": { "arity": 2, "category": "threshold", "family": "threshold", "gf": "LtEqC", "smt": "(<= <lhs> <rhs>)" },
+    "BETWEEN": { "arity": 3, "category": "threshold", "family": "threshold", "gf": "BetweenC", "smt": "(and (>= <x> <lo>) (<= <x> <hi>))" },
+
+    "SUM_SPENT": { "arity": 2, "category": "aggregate", "family": "threshold", "gf": "SumSpent", "smt": "SumSpent(<category>, <window>)" },
+    "COUNT": { "arity": 2, "category": "aggregate", "family": "threshold", "gf": "CountItems", "smt": "CountItems(<kind>, <window>)" },
+    "USED_PCT": { "arity": 1, "category": "aggregate", "family": "threshold", "gf": "UsedPct", "smt": "UsedPct(<resource>)" },
+
+    "LAST_N_DAYS": { "arity": 1, "category": "window", "family": "threshold", "gf": "LastNDays", "smt": "last_<n>_days" },
+    "NEXT_N_DAYS": { "arity": 1, "category": "window", "family": "threshold", "gf": "NextNDays", "smt": "next_<n>_days" },
+    "OLDER_THAN": { "arity": 1, "category": "window", "family": "recurrence", "gf": "OlderThan", "smt": "older_than_<n>" },
+
+    "EVERY_N_DAYS": { "arity": 2, "category": "recurrence", "family": "recurrence", "gf": "EveryNDays", "smt": "(EveryNDays(<n>, <action>))" },
+    "EVERY_N_HOURS": { "arity": 2, "category": "recurrence", "family": "recurrence", "gf": "EveryNHours", "smt": "(EveryNHours(<n>, <action>))" },
+    "EVERY_N_MONTHS": { "arity": 2, "category": "recurrence", "family": "recurrence", "gf": "EveryNMonths", "smt": "(EveryNMonths(<n>, <action>))" },
+    "EVERY_WEEK": { "arity": 2, "category": "recurrence", "family": "recurrence", "gf": "EveryWeekOn", "smt": "(EveryWeekOn(<weekday>, <action>))" },
+    "WEEKDAY_ON": { "arity": 2, "category": "recurrence", "family": "recurrence", "gf": "WeeklyOn", "smt": "(WeeklyOn(<weekday>, <action>))" },
+    "WEEKDAY_ORD": { "arity": 3, "category": "recurrence", "family": "recurrence", "gf": "WeekdayOrdinal", "smt": "(WeekdayOrdinal(<ordinal>, <weekday>, <action>))" },
+    "DAILY_AT": { "arity": 2, "category": "recurrence", "family": "recurrence", "gf": "DailyAt", "smt": "(DailyAt(<time>, <action>))" },
+    "AT": { "arity": 2, "category": "recurrence", "family": "recurrence", "gf": "AtTime", "smt": "(AtTime(<time>, <action>))" },
+    "IN_BAND": { "arity": 2, "category": "recurrence", "family": "recurrence", "gf": "InTimeBand", "smt": "(InTimeBand(<band>, <action>))" },
+
+    "OFTEN": { "arity": 1, "category": "frequency", "family": "frequency", "gf": "Often", "smt": "(Often(<action>))" },
+    "OCCASIONAL": { "arity": 1, "category": "frequency", "family": "frequency", "gf": "Occasionally", "smt": "(Occasionally(<action>))" },
+    "NEARLY_ALWAYS": { "arity": 1, "category": "frequency", "family": "frequency", "gf": "NearlyAlways", "smt": "(NearlyAlways(<action>))" },
+    "PROBABLY": { "arity": 2, "category": "frequency", "family": "frequency", "gf": "WithProbability", "smt": "(WithProbability(<pct>, <action>))" },
+
+    "ON": { "arity": 1, "category": "action", "family": "conditional", "gf": "TurnOn", "smt": "(TurnOn(<device>))" },
+    "OFF": { "arity": 1, "category": "action", "family": "conditional", "gf": "TurnOff", "smt": "(TurnOff(<device>))" },
+    "SET": { "arity": 2, "category": "action", "family": "recurrence", "gf": "SetTo", "smt": "(SetTo(<device>, <value>))" },
+    "RUN": { "arity": 1, "category": "action", "family": "recurrence", "gf": "Execute", "smt": "(Execute(<job>))" },
+    "SKIP": { "arity": 1, "category": "action", "family": "conditional", "gf": "Skip", "smt": "(Skip(<item>))" },
+    "REMIND": { "arity": 1, "category": "action", "family": "recurrence", "gf": "Remind", "smt": "(Remind(<item>))" },
+    "PREPARE": { "arity": 1, "category": "action", "family": "recurrence", "gf": "Prepare", "smt": "(Prepare(<item>))" },
+    "SCHEDULE": { "arity": 1, "category": "action", "family": "recurrence", "gf": "Schedule", "smt": "(Schedule(<item>))" },
+    "RESCHEDULE": { "arity": 2, "category": "action", "family": "conditional", "gf": "Reschedule", "smt": "(Reschedule(<item>, <shift>))" },
+    "MOVE": { "arity": 2, "category": "action", "family": "frequency", "gf": "MoveTo", "smt": "(MoveTo(<item>, <shift>))" },
+    "DO": { "arity": 2, "category": "action", "family": "recurrence", "gf": "Perform", "smt": "(Perform(<activity>, <duration>))" },
+    "MEASURE": { "arity": 1, "category": "action", "family": "recurrence", "gf": "Measure", "smt": "(Measure(<indicator>))" },
+    "TRANSFER": { "arity": 2, "category": "action", "family": "recurrence", "gf": "Transfer", "smt": "(Transfer(<amount>, <fund>))" },
+    "PAUSE": { "arity": 1, "category": "action", "family": "conditional", "gf": "Pause", "smt": "(Pause(<rule>))" },
+    "LIMIT": { "arity": 2, "category": "action", "family": "threshold", "gf": "Cap", "smt": "(Cap(<category>, <amount>))" },
+    "INCREASE": { "arity": 2, "category": "action", "family": "threshold", "gf": "Increase", "smt": "(Increase(<fund>, <delta>))" },
+    "ALERT": { "arity": 1, "category": "action", "family": "threshold", "gf": "Notify", "smt": "(Notify(<channel>))" },
+    "ARCHIVE": { "arity": 2, "category": "action", "family": "recurrence", "gf": "Archive", "smt": "(Archive(<kind>, <window>))" },
+    "DELETE": { "arity": 1, "category": "action", "family": "threshold", "gf": "Purge", "smt": "(Purge(<kind>))" },
+    "SYNC": { "arity": 1, "category": "action", "family": "recurrence", "gf": "Synchronize", "smt": "(Synchronize(<job>))" },
+    "FOCUS": { "arity": 1, "category": "action", "family": "frequency", "gf": "FocusOn", "smt": "(FocusOn(<task>))" },
+    "REVIEW": { "arity": 1, "category": "action", "family": "recurrence", "gf": "Verify", "smt": "(Verify(<task>))" }
+  },
+  "leaf_tags": {
+    "entity": "square node holding the canonical id, for example [ dehumidifier ]",
+    "numeric": "square node holding unit and value, for example [ pct 65 ]",
+    "time": "square node [ time HH:MM ]",
+    "band": "square node [ band evening ]",
+    "ordinal": "square node [ ord 1 ] or [ ord last ]",
+    "literal": "square node holding one lowercase token, for example [ month ]"
+  },
+  "literal_leaves": ["balance", "disk", "month", "year", "next_day", "month_end", "other_slot"]
+}

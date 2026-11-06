@@ -1,0 +1,349 @@
+{
+  "meta": {
+    "name": "LingoLOGOS slot lexicon",
+    "description": "Slot fillers for the synthetic recurrence corpus. Every entry carries a canonical ASCII id plus the surface form of the five supported languages. Surface forms are pre-inflected for the syntactic role used by the templates: German devices and activities are in the accusative (they are direct objects), Italian state clauses also provide a subjunctive variant in the it_sub field, German state clauses are in verb-final subordinate order.",
+    "languages": ["it", "en", "fr", "es", "de"],
+    "note": "This file is language data under study, so it is intentionally UTF-8. Python sources stay ASCII only."
+  },
+  "number_formats": {
+    "pct": { "it": "{v}%", "en": "{v}%", "fr": "{v} %", "es": "{v}%", "de": "{v} %" },
+    "celsius": { "it": "{v} gradi", "en": "{v} degrees", "fr": "{v} degrés", "es": "{v} grados", "de": "{v} Grad" },
+    "eur": { "it": "{v} euro", "en": "{v} euros", "fr": "{v} euros", "es": "{v} euros", "de": "{v} Euro" },
+    "minute": { "it": "{v} minuti", "en": "{v} minutes", "fr": "{v} minutes", "es": "{v} minutos", "de": "{v} Minuten" },
+    "hour": { "it": "{v} ore", "en": "{v} hours", "fr": "{v} heures", "es": "{v} horas", "de": "{v} Stunden" },
+    "day": { "it": "{v} giorni", "en": "{v} days", "fr": "{v} jours", "es": "{v} días", "de": "{v} Tage" },
+    "week": { "it": "{v} settimane", "en": "{v} weeks", "fr": "{v} semaines", "es": "{v} semanas", "de": "{v} Wochen" },
+    "month": { "it": "{v} mesi", "en": "{v} months", "fr": "{v} mois", "es": "{v} meses", "de": "{v} Monate" },
+    "count": { "it": "{v}", "en": "{v}", "fr": "{v}", "es": "{v}", "de": "{v}" },
+    "mmhg": { "it": "{v} mmHg", "en": "{v} mmHg", "fr": "{v} mmHg", "es": "{v} mmHg", "de": "{v} mmHg" },
+    "mgdl": { "it": "{v} mg/dl", "en": "{v} mg/dl", "fr": "{v} mg/dl", "es": "{v} mg/dl", "de": "{v} mg/dl" },
+    "bpm": { "it": "{v} bpm", "en": "{v} bpm", "fr": "{v} bpm", "es": "{v} bpm", "de": "{v} bpm" },
+    "kg": { "it": "{v} kg", "en": "{v} kg", "fr": "{v} kg", "es": "{v} kg", "de": "{v} kg" },
+    "kwh": { "it": "{v} kWh", "en": "{v} kWh", "fr": "{v} kWh", "es": "{v} kWh", "de": "{v} kWh" }
+  },
+  "variant_convention": "A template may ask for a case or mood variant of a slot with the suffix form slot|variant. The generator looks for a flat key '<lang>_<variant>' first (for example it_sub) and then for a 'variant' object keyed by language (for example acc -> de). If the variant is missing the default surface form is used.",
+  "clock_formats": {
+    "it": "alle {t}",
+    "en": "at {t}",
+    "fr": "à {t}",
+    "es": "a las {t}",
+    "de": "um {t}"
+  },
+  "ordinal_form_convention": "Entries of the ordinal_k class carry an ord field holding the canonical algebra token, for example 1, 2, 3 or last.",
+  "slots": {
+    "device_switchable": [
+      { "id": "dehumidifier", "it": "il deumidificatore", "en": "the dehumidifier", "fr": "le déshumidificateur", "es": "el deshumidificador", "de": "den Luftentfeuchter" },
+      { "id": "humidifier", "it": "l'umidificatore", "en": "the humidifier", "fr": "l'humidificateur", "es": "el humidificador", "de": "den Luftbefeuchter" },
+      { "id": "air_conditioner", "it": "il condizionatore", "en": "the air conditioner", "fr": "la climatisation", "es": "el aire acondicionado", "de": "die Klimaanlage" },
+      { "id": "boiler", "it": "la caldaia", "en": "the boiler", "fr": "la chaudière", "es": "la caldera", "de": "die Heizung" },
+      { "id": "heat_pump", "it": "la pompa di calore", "en": "the heat pump", "fr": "la pompe à chaleur", "es": "la bomba de calor", "de": "die Wärmepumpe" },
+      { "id": "electric_heater", "it": "il termoventilatore", "en": "the electric heater", "fr": "le radiateur électrique", "es": "el radiador eléctrico", "de": "die Elektroheizung" },
+      { "id": "washing_machine", "it": "la lavatrice", "en": "the washing machine", "fr": "le lave-linge", "es": "la lavadora", "de": "die Waschmaschine" },
+      { "id": "dishwasher", "it": "la lavastoviglie", "en": "the dishwasher", "fr": "le lave-vaisselle", "es": "el lavavajillas", "de": "den Geschirrspüler" },
+      { "id": "kitchen_lamp", "it": "la lampada della cucina", "en": "the kitchen lamp", "fr": "la lampe de la cuisine", "es": "la lámpara de la cocina", "de": "die Küchenlampe" },
+      { "id": "living_room_lights", "it": "la luce del soggiorno", "en": "the living room light", "fr": "la lumière du séjour", "es": "la luz del salón", "de": "das Wohnzimmerlicht" },
+      { "id": "irrigation_valve", "it": "l'elettrovalvola dell'irrigazione", "en": "the irrigation valve", "fr": "l'électrovanne d'arrosage", "es": "la válvula de riego", "de": "das Bewässerungsventil" },
+      { "id": "electric_vehicle_charger", "it": "il caricabatterie dell'auto elettrica", "en": "the electric car charger", "fr": "la borne de recharge", "es": "el cargador del coche eléctrico", "de": "die Autoladestation" }
+    ],
+    "metric_environment": [
+      { "id": "humidity", "it": "l'umidità", "en": "the humidity", "fr": "l'humidité", "es": "la humedad", "de": "die Luftfeuchtigkeit" },
+      { "id": "temperature", "it": "la temperatura", "en": "the temperature", "fr": "la température", "es": "la temperatura", "de": "die Temperatur" },
+      { "id": "power_consumption", "it": "il consumo di corrente", "en": "the power draw", "fr": "la consommation électrique", "es": "el consumo eléctrico", "de": "der Stromverbrauch" },
+      { "id": "air_quality", "it": "la qualità dell'aria", "en": "the air quality", "fr": "la qualité de l'air", "es": "la calidad del aire", "de": "die Luftqualität" },
+      { "id": "co2_level", "it": "il livello di CO2", "en": "the CO2 level", "fr": "le taux de CO2", "es": "el nivel de CO2", "de": "der CO2-Wert" },
+      { "id": "water_pressure", "it": "la pressione dell'acqua", "en": "the water pressure", "fr": "la pression de l'eau", "es": "la presión del agua", "de": "der Wasserdruck" },
+      { "id": "floor_temperature", "it": "la temperatura del pavimento", "en": "the floor temperature", "fr": "la température du sol", "es": "la temperatura del suelo", "de": "die Fußbodentemperatur" }
+    ],
+    "state_clause": [
+      { "id": "home_present", "it": "c'è qualcuno in casa", "it_sub": "ci sia qualcuno in casa", "en": "someone is home", "fr": "quelqu'un est à la maison", "es": "alguien está en casa", "de": "jemand zu Hause ist" },
+      { "id": "nobody_home", "it": "non c'è nessuno in casa", "it_sub": "non ci sia nessuno in casa", "en": "the house is empty", "fr": "la maison est vide", "es": "la casa está vacía", "de": "niemand zu Hause ist" },
+      { "id": "house_asleep", "it": "tutti dormono", "it_sub": "tutti dormano", "en": "everyone is asleep", "fr": "tout le monde dort", "es": "todos están dormidos", "de": "alle schlafen" },
+      { "id": "guests_expected", "it": "ci sono ospiti attesi", "it_sub": "ci siano ospiti attesi", "en": "guests are expected", "fr": "des invités sont attendus", "es": "se esperan invitados", "de": "Gäste erwartet werden" },
+      { "id": "raining", "it": "piove", "it_sub": "piova", "en": "it is raining", "fr": "il pleut", "es": "está lloviendo", "de": "es regnet" },
+      { "id": "sunny", "it": "c'è il sole", "it_sub": "ci sia il sole", "en": "the sun is shining", "fr": "il y a du soleil", "es": "hace sol", "de": "die Sonne scheint" },
+      { "id": "freezing_outside", "it": "fuori gela", "it_sub": "fuori geli", "en": "it is freezing outside", "fr": "il gèle dehors", "es": "está bajo cero afuera", "de": "es draußen friert" },
+      { "id": "strong_wind", "it": "c'è molto vento", "it_sub": "ci sia molto vento", "en": "the wind is strong", "fr": "le vent est fort", "es": "hace mucho viento", "de": "starker Wind weht" },
+      { "id": "grid_peak_hours", "it": "sono ore di picco della rete", "it_sub": "siano ore di picco della rete", "en": "it is grid peak time", "fr": "c'est l'heure de pointe du réseau", "es": "es hora punta de la red", "de": "Netzspitzenzeit ist" },
+      { "id": "solar_production", "it": "il fotovoltaico sta producendo", "it_sub": "il fotovoltaico stia producendo", "en": "the solar panels are producing", "fr": "les panneaux solaires produisent", "es": "los paneles solares están produciendo", "de": "die Solaranlage produziert" },
+      { "id": "tariff_off_peak", "it": "la tariffa è in fascia fuori punta", "it_sub": "la tariffa sia in fascia fuori punta", "en": "the tariff is off-peak", "fr": "le tarif est en heures creuses", "es": "la tarifa está en valle", "de": "der Tarif im Niedertarif ist" },
+      { "id": "device_plugged_in", "it": "l'apparecchio è collegato alla corrente", "it_sub": "l'apparecchio sia collegato alla corrente", "en": "the device is plugged in", "fr": "l'appareil est branché", "es": "el aparato está conectado a la corriente", "de": "das Gerät am Strom angeschlossen ist" },
+      { "id": "computer_idle", "it": "il computer è inattivo", "it_sub": "il computer sia inattivo", "en": "the computer is idle", "fr": "l'ordinateur est inactif", "es": "el ordenador está inactivo", "de": "der Rechner untätig ist" },
+      { "id": "computer_plugged_in", "it": "il computer è collegato alla corrente", "it_sub": "il computer sia collegato alla corrente", "en": "the computer is plugged in", "fr": "l'ordinateur est sur secteur", "es": "el ordenador está conectado a la corriente", "de": "der Rechner am Strom angeschlossen ist" },
+      { "id": "laptop_on_battery", "it": "il portatile è a batteria", "it_sub": "il portatile sia a batteria", "en": "the laptop is on battery", "fr": "le portable est sur batterie", "es": "el portátil va a batería", "de": "das Notebook auf Akku läuft" },
+      { "id": "external_drive_connected", "it": "il disco esterno è collegato", "it_sub": "il disco esterno sia collegato", "en": "the external drive is connected", "fr": "le disque externe est branché", "es": "el disco externo está conectado", "de": "die externe Festplatte angeschlossen ist" },
+      { "id": "vpn_active", "it": "la VPN è attiva", "it_sub": "la VPN sia attiva", "en": "the VPN is active", "fr": "le VPN est actif", "es": "la VPN está activa", "de": "das VPN aktiv ist" },
+      { "id": "meeting_running", "it": "è in corso una riunione", "it_sub": "sia in corso una riunione", "en": "a meeting is running", "fr": "une réunion est en cours", "es": "hay una reunión en curso", "de": "ein Meeting läuft" },
+      { "id": "public_holiday", "it": "è festivo", "it_sub": "sia festivo", "en": "it is a public holiday", "fr": "c'est un jour férié", "es": "es festivo", "de": "ein Feiertag ist" },
+      { "id": "travel_day", "it": "sono in viaggio", "it_sub": "sia in viaggio", "en": "I am travelling", "fr": "je suis en déplacement", "es": "estoy de viaje", "de": "ich auf Reisen bin" },
+      { "id": "family_commitment", "it": "ho un impegno familiare", "it_sub": "abbia un impegno familiare", "en": "I have a family commitment", "fr": "j'ai un engagement familial", "es": "tengo un compromiso familiar", "de": "ich einen Familientermin habe" },
+      { "id": "stomach_full", "it": "lo stomaco è pieno", "it_sub": "lo stomaco sia pieno", "en": "my stomach is full", "fr": "l'estomac est plein", "es": "el estómago está lleno", "de": "der Magen voll ist" },
+      { "id": "well_rested", "it": "ho dormito a sufficienza", "it_sub": "abbia dormito a sufficienza", "en": "I have slept enough", "fr": "j'ai assez dormi", "es": "he dormido lo suficiente", "de": "ich genug geschlafen habe" },
+      { "id": "gym_available", "it": "la palestra è libera", "it_sub": "la palestra sia libera", "en": "the gym is free", "fr": "la salle de sport est libre", "es": "el gimnasio está libre", "de": "das Fitnessstudio frei ist" },
+      { "id": "weather_mild", "it": "il clima è mite", "it_sub": "il clima sia mite", "en": "the weather is mild", "fr": "le temps est doux", "es": "el clima es suave", "de": "das Wetter mild ist" }
+    ],
+    "clock_time": [
+      { "id": "t_0630", "value": "06:30" },
+      { "id": "t_0700", "value": "07:00" },
+      { "id": "t_0800", "value": "08:00" },
+      { "id": "t_0930", "value": "09:30" },
+      { "id": "t_1230", "value": "12:30" },
+      { "id": "t_1300", "value": "13:00" },
+      { "id": "t_1730", "value": "17:30" },
+      { "id": "t_1830", "value": "18:30" },
+      { "id": "t_2000", "value": "20:00" },
+      { "id": "t_2130", "value": "21:30" },
+      { "id": "t_2230", "value": "22:30" },
+      { "id": "t_2300", "value": "23:00" }
+    ],
+    "time_band": [
+      { "id": "early_morning", "it": "di primo mattino", "en": "early in the morning", "fr": "tôt le matin", "es": "a primera hora de la mañana", "de": "früh am Morgen" },
+      { "id": "morning", "it": "al mattino", "en": "in the morning", "fr": "le matin", "es": "por la mañana", "de": "am Morgen" },
+      { "id": "midday", "it": "a mezzogiorno", "en": "around midday", "fr": "à midi", "es": "al mediodía", "de": "mittags" },
+      { "id": "afternoon", "it": "al pomeriggio", "en": "in the afternoon", "fr": "l'après-midi", "es": "por la tarde", "de": "am Nachmittag" },
+      { "id": "evening", "it": "di sera", "en": "in the evening", "fr": "le soir", "es": "por la noche", "de": "am Abend" },
+      { "id": "late_evening", "it": "in tarda serata", "en": "late in the evening", "fr": "tard dans la soirée", "es": "a última hora de la noche", "de": "spät am Abend" },
+      { "id": "night", "it": "di notte", "en": "at night", "fr": "la nuit", "es": "de noche", "de": "nachts" }
+    ],
+    "weekday": [
+      { "id": "monday", "it": "lunedì", "en": "Monday", "fr": "lundi", "es": "lunes", "de": "Montag" },
+      { "id": "tuesday", "it": "martedì", "en": "Tuesday", "fr": "mardi", "es": "martes", "de": "Dienstag" },
+      { "id": "wednesday", "it": "mercoledì", "en": "Wednesday", "fr": "mercredi", "es": "miércoles", "de": "Mittwoch" },
+      { "id": "thursday", "it": "giovedì", "en": "Thursday", "fr": "jeudi", "es": "jueves", "de": "Donnerstag" },
+      { "id": "friday", "it": "venerdì", "en": "Friday", "fr": "vendredi", "es": "viernes", "de": "Freitag" },
+      { "id": "saturday", "it": "sabato", "en": "Saturday", "fr": "samedi", "es": "sábado", "de": "Samstag" },
+      { "id": "sunday", "it": "domenica", "en": "Sunday", "fr": "dimanche", "es": "domingo", "de": "Sonntag" }
+    ],
+    "ordinal_k": [
+      { "id": "k1", "ord": "1", "it": "primo", "en": "1st", "fr": "1er", "es": "primer", "de": "1" },
+      { "id": "k2", "ord": "2", "it": "secondo", "en": "2nd", "fr": "2e", "es": "segundo", "de": "2" },
+      { "id": "k3", "ord": "3", "it": "terzo", "en": "3rd", "fr": "3e", "es": "tercer", "de": "3" },
+      { "id": "k_last", "ord": "last", "it": "ultimo", "en": "last", "fr": "dernier", "es": "último", "de": "letzten" }
+    ],
+    "ordinal_last": [
+      { "id": "k_last", "ord": "last", "it": "ultimo", "en": "last", "fr": "dernier", "es": "último", "de": "letzten" }
+    ],
+    "count_days_short": [
+      { "id": "d2", "value": 2, "unit": "day" },
+      { "id": "d3", "value": 3, "unit": "day" },
+      { "id": "d4", "value": 4, "unit": "day" },
+      { "id": "d5", "value": 5, "unit": "day" },
+      { "id": "d7", "value": 7, "unit": "day" },
+      { "id": "d10", "value": 10, "unit": "day" },
+      { "id": "d14", "value": 14, "unit": "day" }
+    ],
+    "count_days_long": [
+      { "id": "d30", "value": 30, "unit": "day" },
+      { "id": "d60", "value": 60, "unit": "day" },
+      { "id": "d90", "value": 90, "unit": "day" },
+      { "id": "mo3", "value": 3, "unit": "month" },
+      { "id": "mo6", "value": 6, "unit": "month" },
+      { "id": "w2", "value": 2, "unit": "week" },
+      { "id": "w4", "value": 4, "unit": "week" }
+    ],
+    "count_hours": [
+      { "id": "h6", "value": 6, "unit": "hour" },
+      { "id": "h8", "value": 8, "unit": "hour" },
+      { "id": "h12", "value": 12, "unit": "hour" },
+      { "id": "h24", "value": 24, "unit": "hour" },
+      { "id": "h48", "value": 48, "unit": "hour" }
+    ],
+    "count_minutes": [
+      { "id": "m15", "value": 15, "unit": "minute" },
+      { "id": "m20", "value": 20, "unit": "minute" },
+      { "id": "m30", "value": 30, "unit": "minute" },
+      { "id": "m45", "value": 45, "unit": "minute" },
+      { "id": "m60", "value": 60, "unit": "minute" }
+    ],
+    "count_small": [
+      { "id": "c2", "value": 2, "unit": "count" },
+      { "id": "c3", "value": 3, "unit": "count" },
+      { "id": "c4", "value": 4, "unit": "count" },
+      { "id": "c5", "value": 5, "unit": "count" },
+      { "id": "c6", "value": 6, "unit": "count" },
+      { "id": "c8", "value": 8, "unit": "count" }
+    ],
+    "value_pct": [
+      { "id": "p40", "value": 40, "unit": "pct" },
+      { "id": "p45", "value": 45, "unit": "pct" },
+      { "id": "p50", "value": 50, "unit": "pct" },
+      { "id": "p55", "value": 55, "unit": "pct" },
+      { "id": "p60", "value": 60, "unit": "pct" },
+      { "id": "p65", "value": 65, "unit": "pct" },
+      { "id": "p70", "value": 70, "unit": "pct" },
+      { "id": "p85", "value": 85, "unit": "pct" }
+    ],
+    "value_pct_low": [
+      { "id": "lp30", "value": 30, "unit": "pct" },
+      { "id": "lp35", "value": 35, "unit": "pct" },
+      { "id": "lp40", "value": 40, "unit": "pct" }
+    ],
+    "value_temp": [
+      { "id": "c18", "value": 18, "unit": "celsius" },
+      { "id": "c19", "value": 19, "unit": "celsius" },
+      { "id": "c20", "value": 20, "unit": "celsius" },
+      { "id": "c21", "value": 21, "unit": "celsius" },
+      { "id": "c22", "value": 22, "unit": "celsius" },
+      { "id": "c24", "value": 24, "unit": "celsius" },
+      { "id": "c26", "value": 26, "unit": "celsius" }
+    ],
+    "value_temp_low": [
+      { "id": "lc3", "value": 3, "unit": "celsius" },
+      { "id": "lc5", "value": 5, "unit": "celsius" },
+      { "id": "lc8", "value": 8, "unit": "celsius" },
+      { "id": "lc10", "value": 10, "unit": "celsius" },
+      { "id": "lc12", "value": 12, "unit": "celsius" }
+    ],
+    "value_pct_pair": [
+      { "id": "pair45_55", "value": 45, "second": 55, "unit": "pct" },
+      { "id": "pair50_60", "value": 50, "second": 60, "unit": "pct" },
+      { "id": "pair55_65", "value": 55, "second": 65, "unit": "pct" },
+      { "id": "pair40_50", "value": 40, "second": 50, "unit": "pct" }
+    ],
+    "value_temp_pair": [
+      { "id": "pair18_22", "value": 18, "second": 22, "unit": "celsius" },
+      { "id": "pair19_23", "value": 19, "second": 23, "unit": "celsius" },
+      { "id": "pair20_24", "value": 20, "second": 24, "unit": "celsius" },
+      { "id": "pair21_26", "value": 21, "second": 26, "unit": "celsius" }
+    ],
+    "money_amount": [
+      { "id": "e25", "value": 25, "unit": "eur" },
+      { "id": "e50", "value": 50, "unit": "eur" },
+      { "id": "e75", "value": 75, "unit": "eur" },
+      { "id": "e100", "value": 100, "unit": "eur" },
+      { "id": "e150", "value": 150, "unit": "eur" },
+      { "id": "e200", "value": 200, "unit": "eur" },
+      { "id": "e250", "value": 250, "unit": "eur" },
+      { "id": "e300", "value": 300, "unit": "eur" },
+      { "id": "e400", "value": 400, "unit": "eur" },
+      { "id": "e500", "value": 500, "unit": "eur" }
+    ],
+    "balance_level": [
+      { "id": "b300", "value": 300, "unit": "eur" },
+      { "id": "b500", "value": 500, "unit": "eur" },
+      { "id": "b800", "value": 800, "unit": "eur" },
+      { "id": "b1000", "value": 1000, "unit": "eur" },
+      { "id": "b1500", "value": 1500, "unit": "eur" },
+      { "id": "b2000", "value": 2000, "unit": "eur" }
+    ],
+    "money_pair": [
+      { "id": "pair100_200", "value": 100, "second": 200, "unit": "eur" },
+      { "id": "pair200_300", "value": 200, "second": 300, "unit": "eur" },
+      { "id": "pair300_450", "value": 300, "second": 450, "unit": "eur" },
+      { "id": "pair500_700", "value": 500, "second": 700, "unit": "eur" }
+    ],
+    "pct_point": [
+      { "id": "pc5", "value": 5, "unit": "pct" },
+      { "id": "pc10", "value": 10, "unit": "pct" },
+      { "id": "pc15", "value": 15, "unit": "pct" },
+      { "id": "pc20", "value": 20, "unit": "pct" }
+    ],
+    "fund_goal": [
+      { "id": "savings_fund", "it": "sul fondo risparmio", "en": "into the savings fund", "fr": "vers le fonds d'épargne", "es": "al fondo de ahorro", "de": "auf das Sparkonto" },
+      { "id": "emergency_fund", "it": "sul fondo emergenze", "en": "into the emergency fund", "fr": "vers le fonds d'urgence", "es": "al fondo de emergencias", "de": "auf den Notfallfonds" },
+      { "id": "energy_fund", "it": "sul fondo per la bolletta", "en": "into the energy bill fund", "fr": "vers le fonds facture d'énergie", "es": "al fondo de la factura de luz", "de": "auf den Energiefonds" },
+      { "id": "holiday_fund", "it": "sul fondo vacanze", "en": "into the holiday fund", "fr": "vers le fonds vacances", "es": "al fondo de vacaciones", "de": "auf den Reisefonds" },
+      { "id": "maintenance_fund", "it": "sul fondo manutenzione", "en": "into the maintenance fund", "fr": "vers le fonds entretien", "es": "al fondo de mantenimiento", "de": "auf den Instandhaltungsfonds" },
+      { "id": "education_fund", "it": "sul fondo istruzione", "en": "into the education fund", "fr": "vers le fonds études", "es": "al fondo de educación", "de": "auf den Bildungsfonds" }
+    ],
+    "expense_category": [
+      { "id": "groceries", "it": "la spesa alimentare", "en": "the grocery spending", "fr": "la dépense alimentaire", "es": "el gasto en alimentación", "de": "die Lebensmittelausgabe" },
+      { "id": "utilities", "it": "la bolletta di casa", "en": "the utility bill", "fr": "la facture d'énergie", "es": "la factura de casa", "de": "die Energieabrechnung" },
+      { "id": "transport", "it": "la spesa per i trasporti", "en": "the transport spending", "fr": "la dépense de transport", "es": "el gasto en transporte", "de": "die Mobilitätsausgabe" },
+      { "id": "dining_out", "it": "la spesa per i ristoranti", "en": "the dining out spending", "fr": "la dépense de restaurant", "es": "el gasto en restaurantes", "de": "die Restaurantausgabe" },
+      { "id": "entertainment", "it": "la spesa per l'intrattenimento", "en": "the entertainment spending", "fr": "la dépense de loisirs", "es": "el gasto en ocio", "de": "die Freizeitausgabe" },
+      { "id": "subscriptions", "it": "la spesa per gli abbonamenti", "en": "the subscription spending", "fr": "la dépense d'abonnement", "es": "el gasto en suscripciones", "de": "die Abonnementausgabe" },
+      { "id": "fuel", "it": "la spesa per il carburante", "en": "the fuel spending", "fr": "la dépense de carburant", "es": "el gasto en combustible", "de": "die Kraftstoffausgabe" }
+    ],
+    "money_rule": [
+      { "id": "subscription_renewal", "it": "il rinnovo dell'abbonamento", "en": "the subscription renewal", "fr": "le renouvellement d'abonnement", "es": "la renovación de la suscripción", "de": "die Abonnementverlängerung" },
+      { "id": "utility_direct_debit", "it": "l'addebito della bolletta", "en": "the utility direct debit", "fr": "le prélèvement de la facture", "es": "el cargo de la factura", "de": "die Lastschrift" },
+      { "id": "rent_transfer", "it": "il bonifico dell'affitto", "en": "the rent transfer", "fr": "le virement du loyer", "es": "la transferencia del alquiler", "de": "die Mietüberweisung" },
+      { "id": "insurance_payment", "it": "il pagamento dell'assicurazione", "en": "the insurance payment", "fr": "le paiement de l'assurance", "es": "el pago del seguro", "de": "die Versicherungsprämie" },
+      { "id": "school_fee", "it": "la rata scolastica", "en": "the school fee", "fr": "la mensualité scolaire", "es": "el recibo escolar", "de": "das Schulgeld" }
+    ],
+    "alert_channel": [
+      { "id": "alert_message", "it": "un avviso", "en": "an alert", "fr": "une alerte", "es": "un aviso", "de": "eine Benachrichtigung" },
+      { "id": "alert_email", "it": "una email", "en": "an email", "fr": "un courriel", "es": "un correo", "de": "eine E-Mail" },
+      { "id": "alert_push", "it": "una notifica sul telefono", "en": "a push notification", "fr": "une notification", "es": "una notificación", "de": "eine Push-Nachricht" },
+      { "id": "alert_summary", "it": "un riepilogo", "en": "a summary", "fr": "un récapitulatif", "es": "un resumen", "de": "eine Übersicht" }
+    ],
+    "agenda_task": [
+      { "id": "car_service", "it": "la revisione dell'auto", "en": "the car service", "fr": "la révision de la voiture", "es": "la revisión del coche", "de": "die Fahrzeugwartung" },
+      { "id": "dental_checkup", "it": "il controllo dal dentista", "en": "the dental checkup", "fr": "le contrôle chez le dentiste", "es": "la revisión del dentista", "de": "den Zahnarzttermin" },
+      { "id": "passport_renewal", "it": "il rinnovo del passaporto", "en": "the passport renewal", "fr": "le renouvellement du passeport", "es": "la renovación del pasaporte", "de": "die Reisepassverlängerung" },
+      { "id": "boiler_inspection", "it": "la manutenzione della caldaia", "en": "the boiler inspection", "fr": "l'entretien de la chaudière", "es": "la revisión de la caldera", "de": "die Heizungswartung" },
+      { "id": "plant_watering", "it": "l'annaffiatura delle piante", "en": "the plant watering", "fr": "l'arrosage des plantes", "es": "el riego de las plantas", "de": "das Gießen der Pflanzen" },
+      { "id": "smoke_alarm_test", "it": "il test del rilevatore di fumo", "en": "the smoke alarm test", "fr": "le test du détecteur de fumée", "es": "la prueba del detector de humo", "de": "der Rauchmeldertest" },
+      { "id": "taxes_filing", "it": "la dichiarazione dei redditi", "en": "the tax filing", "fr": "la déclaration d'impôts", "es": "la declaración de la renta", "de": "die Steuererklärung" },
+      { "id": "insurance_renewal", "it": "il rinnovo dell'assicurazione", "en": "the insurance renewal", "fr": "le renouvellement de l'assurance", "es": "la renovación del seguro", "de": "die Versicherungserneuerung" }
+    ],
+    "meeting_kind": [
+      { "id": "alignment_meeting", "it": "la riunione di allineamento", "en": "the alignment meeting", "fr": "la réunion d'alignement", "es": "la reunión de alineación", "de": "das Abstimmungsmeeting" },
+      { "id": "project_review", "it": "la revisione di progetto", "en": "the project review", "fr": "la revue de projet", "es": "la revisión del proyecto", "de": "das Projektreview" },
+      { "id": "client_call", "it": "la chiamata con il cliente", "en": "the client call", "fr": "l'appel avec le client", "es": "la llamada con el cliente", "de": "den Kundentermin" },
+      { "id": "sprint_retrospective", "it": "la retrospettiva di sprint", "en": "the sprint retrospective", "fr": "la rétrospective de sprint", "es": "la retrospectiva del sprint", "de": "die Sprint-Retrospektive" },
+      { "id": "budget_review", "it": "la revisione di budget", "en": "the budget review", "fr": "la revue budgétaire", "es": "la revisión del presupuesto", "de": "das Budgetreview" },
+      { "id": "vendor_demo", "it": "la demo del fornitore", "en": "the vendor demo", "fr": "la démo du fournisseur", "es": "la demo del proveedor", "de": "die Lieferantendemo" }
+    ],
+    "health_indicator": [
+      { "id": "systolic_pressure", "it": "la pressione sistolica", "en": "the systolic blood pressure", "fr": "la tension systolique", "es": "la presión sistólica", "de": "der systolische Blutdruck", "acc": { "de": "den systolischen Blutdruck" }, "unit": "mmhg", "thresholds": [130, 135, 140, 145] },
+      { "id": "blood_glucose", "it": "la glicemia", "en": "the blood glucose", "fr": "la glycémie", "es": "la glucemia", "de": "der Blutzucker", "acc": { "de": "den Blutzucker" }, "unit": "mgdl", "thresholds": [110, 120, 130, 140] },
+      { "id": "resting_heart_rate", "it": "il battito a riposo", "en": "the resting heart rate", "fr": "le rythme cardiaque au repos", "es": "el pulso en reposo", "de": "der Ruhepuls", "acc": { "de": "den Ruhepuls" }, "unit": "bpm", "thresholds": [90, 95, 100, 110] },
+      { "id": "body_weight", "it": "il peso corporeo", "en": "the body weight", "fr": "le poids corporel", "es": "el peso corporal", "de": "das Körpergewicht", "unit": "kg", "thresholds": [78, 80, 82, 85] },
+      { "id": "oxygen_saturation", "it": "la saturazione di ossigeno", "en": "the oxygen saturation", "fr": "la saturation en oxygène", "es": "la saturación de oxígeno", "de": "die Sauerstoffsättigung", "unit": "pct", "thresholds": [90, 92, 94] },
+      { "id": "evening_pressure", "it": "la pressione serale", "en": "the evening blood pressure", "fr": "la tension du soir", "es": "la presión de la tarde", "de": "der Abendblutdruck", "acc": { "de": "den Abendblutdruck" }, "unit": "mmhg", "thresholds": [120, 125, 130, 135] }
+    ],
+    "health_measure_generic": [
+      { "id": "weight", "it": "il peso", "en": "the weight", "fr": "le poids", "es": "el peso", "de": "das Gewicht", "unit": "kg", "thresholds": [72, 75, 78, 80] },
+      { "id": "steps", "it": "il numero di passi", "en": "the step count", "fr": "le nombre de pas", "es": "el número de pasos", "de": "die Schrittzahl", "unit": "count", "thresholds": [6000, 8000, 10000, 12000] }
+    ],
+    "medication": [
+      { "id": "supplement", "it": "l'integratore", "en": "the supplement", "fr": "le complément alimentaire", "es": "el suplemento", "de": "das Nahrungsergänzungsmittel" },
+      { "id": "vitamin_d", "it": "la vitamina D", "en": "the vitamin D", "fr": "la vitamine D", "es": "la vitamina D", "de": "das Vitamin D" },
+      { "id": "blood_pressure_pill", "it": "la pillola della pressione", "en": "the blood pressure pill", "fr": "le comprimé pour la tension", "es": "la pastilla de la tensión", "de": "die Blutdrucktablette" },
+      { "id": "painkiller", "it": "l'antidolorifico", "en": "the painkiller", "fr": "l'antidouleur", "es": "el analgésico", "de": "das Schmerzmittel" },
+      { "id": "probiotics", "it": "i fermenti lattici", "en": "the probiotics", "fr": "les probiotiques", "es": "los probióticos", "de": "die Probiotika" },
+      { "id": "iron_supplement", "it": "l'integratore di ferro", "en": "the iron supplement", "fr": "le complément de fer", "es": "el suplemento de hierro", "de": "das Eisenpräparat" }
+    ],
+    "activity_kind": [
+      { "id": "brisk_walk", "it": "una camminata veloce", "en": "a brisk walk", "fr": "une marche rapide", "es": "un paseo rápido", "de": "einen Spaziergang" },
+      { "id": "yoga_session", "it": "una sessione di yoga", "en": "a yoga session", "fr": "une séance de yoga", "es": "una sesión de yoga", "de": "eine Yoga-Einheit" },
+      { "id": "strength_workout", "it": "un allenamento di forza", "en": "a strength workout", "fr": "une séance de renforcement", "es": "un entrenamiento de fuerza", "de": "ein Krafttraining" },
+      { "id": "cycling_session", "it": "una sessione in bici", "en": "a cycling session", "fr": "une séance de vélo", "es": "una sesión en bicicleta", "de": "eine Radausfahrt" },
+      { "id": "stretching_routine", "it": "una routine di stretching", "en": "a stretching routine", "fr": "une routine d'étirements", "es": "una rutina de estiramientos", "de": "eine Dehnroutine" },
+      { "id": "swim_session", "it": "una nuotata", "en": "a swim session", "fr": "une séance de natation", "es": "una sesión de natación", "de": "ein Schwimmtraining" }
+    ],
+    "it_job": [
+      { "id": "file_backup", "it": "il backup dei file", "en": "the file backup", "fr": "la sauvegarde des fichiers", "es": "la copia de seguridad de los archivos", "de": "die Dateisicherung" },
+      { "id": "document_sync", "it": "la sincronizzazione dei documenti", "en": "the document sync", "fr": "la synchronisation des documents", "es": "la sincronización de documentos", "de": "die Synchronisation der Dokumente" },
+      { "id": "email_archive", "it": "l'archiviazione delle email", "en": "the email archiving", "fr": "l'archivage des courriels", "es": "el archivo de los correos", "de": "die E-Mail-Archivierung" },
+      { "id": "cache_cleanup", "it": "la pulizia della cache", "en": "the cache cleanup", "fr": "le nettoyage du cache", "es": "la limpieza de la caché", "de": "die Cache-Bereinigung" },
+      { "id": "photo_backup", "it": "il backup delle foto", "en": "the photo backup", "fr": "la sauvegarde des photos", "es": "la copia de seguridad de las fotos", "de": "die Fotosicherung" },
+      { "id": "log_rotation", "it": "la rotazione dei log", "en": "the log rotation", "fr": "la rotation des journaux", "es": "la rotación de los registros", "de": "die Log-Rotation" }
+    ],
+    "file_kind": [
+      { "id": "old_emails", "it": "le email", "en": "the old emails", "fr": "les courriels anciens", "es": "los correos antiguos", "de": "die alten E-Mails" },
+      { "id": "pdf_documents", "it": "i documenti PDF", "en": "the PDF documents", "fr": "les documents PDF", "es": "los documentos PDF", "de": "die PDF-Dokumente" },
+      { "id": "screenshots", "it": "gli screenshot", "en": "the screenshots", "fr": "les captures d'écran", "es": "las capturas de pantalla", "de": "die Screenshots" },
+      { "id": "log_files", "it": "i file di log", "en": "the log files", "fr": "les fichiers journaux", "es": "los archivos de registro", "de": "die Log-Dateien" },
+      { "id": "downloads", "it": "i file scaricati", "en": "the downloaded files", "fr": "les fichiers téléchargés", "es": "los archivos descargados", "de": "die heruntergeladenen Dateien" }
+    ],
+    "cycle_monthly": [
+      { "id": "monthly", "value": 1, "unit": "month", "it": "mese", "en": "month", "fr": "mois", "es": "mes", "de": "Monat" }
+    ],
+    "value_kwh": [
+      { "id": "k20", "value": 20, "unit": "kwh" },
+      { "id": "k30", "value": 30, "unit": "kwh" },
+      { "id": "k45", "value": 45, "unit": "kwh" },
+      { "id": "k60", "value": 60, "unit": "kwh" },
+      { "id": "k80", "value": 80, "unit": "kwh" }
+    ],
+    "storage_level": [
+      { "id": "s70", "value": 70, "unit": "pct" },
+      { "id": "s80", "value": 80, "unit": "pct" },
+      { "id": "s85", "value": 85, "unit": "pct" },
+      { "id": "s90", "value": 90, "unit": "pct" },
+      { "id": "s95", "value": 95, "unit": "pct" }
+    ]
+  }
+}

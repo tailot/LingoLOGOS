@@ -1,0 +1,186 @@
+{
+  "domain": "finanze",
+  "domain_label": "household finances",
+  "templates": [
+    {
+      "id": "FIN-01",
+      "family": "conditional",
+      "pattern_label": "IF GT BALANCE EVERY_WEEK TRANSFER",
+      "slots": {
+        "amount": "money_amount",
+        "fund": "fund_goal",
+        "bal": "balance_level",
+        "dow": "weekday"
+      },
+      "ast": ["IF", ["GT", "balance", "{bal}"], ["EVERY_WEEK", "{dow}", ["TRANSFER", "{amount}", "{fund}"]]],
+      "phrases": {
+        "it": "Versa {amount} {fund} ogni {dow}, purché il saldo sia superiore a {bal}.",
+        "en": "Transfer {amount} {fund} every {dow}, provided the balance is above {bal}.",
+        "fr": "Vire {amount} {fund} chaque {dow}, à condition que le solde dépasse {bal}.",
+        "es": "Transfiere {amount} {fund} cada {dow}, siempre que el saldo supere {bal}.",
+        "de": "Überweise {amount} {fund} jeden {dow}, sofern das Guthaben über {bal} liegt."
+      }
+    },
+    {
+      "id": "FIN-02",
+      "family": "recurrence",
+      "pattern_label": "EVERY_N_MONTHS TRANSFER",
+      "slots": {
+        "amount": "money_amount",
+        "fund": "fund_goal",
+        "n": "cycle_monthly"
+      },
+      "ast": ["EVERY_N_MONTHS", "{n}", ["TRANSFER", "{amount}", "{fund}"]],
+      "phrases": {
+        "it": "Ogni {n} versa {amount} {fund}.",
+        "en": "Every {n} transfer {amount} {fund}.",
+        "fr": "Chaque {n} vire {amount} {fund}.",
+        "es": "Cada {n} transfiere {amount} {fund}.",
+        "de": "Jeden {n} überweise {amount} {fund}."
+      }
+    },
+    {
+      "id": "FIN-03",
+      "family": "threshold",
+      "pattern_label": "IF GTE SUM_SPENT LAST_N_DAYS ALERT",
+      "slots": {
+        "cat": "expense_category",
+        "n": "count_days_short",
+        "v": "money_amount",
+        "alert": "alert_channel"
+      },
+      "ast": ["IF", ["GTE", ["SUM_SPENT", "{cat}", ["LAST_N_DAYS", "{n}"]], "{v}"], ["ALERT", "{alert}"]],
+      "phrases": {
+        "it": "Se {cat} degli ultimi {n} supera {v}, mandami {alert}.",
+        "en": "If {cat} of the last {n} exceeds {v}, send me {alert}.",
+        "fr": "Si {cat} sur {n} dépasse {v}, envoie-moi {alert}.",
+        "es": "Si {cat} de los últimos {n} supera {v}, mándame {alert}.",
+        "de": "Wenn {cat} der letzten {n} {v} überschreitet, schick mir {alert}."
+      }
+    },
+    {
+      "id": "FIN-04",
+      "family": "conditional",
+      "pattern_label": "UNLESS GTE BALANCE PAUSE",
+      "slots": {
+        "rule": "money_rule",
+        "bal": "balance_level"
+      },
+      "ast": ["UNLESS", ["GTE", "balance", "{bal}"], ["PAUSE", "{rule}"]],
+      "phrases": {
+        "it": "A meno che il saldo non raggiunga {bal}, metti in pausa {rule}.",
+        "en": "Unless the balance reaches {bal}, pause {rule}.",
+        "fr": "Sauf si le solde atteint {bal}, mets en pause {rule}.",
+        "es": "Salvo si el saldo alcanza {bal}, pausa {rule}.",
+        "de": "Außer wenn das Guthaben {bal} erreicht, pausiere {rule}."
+      }
+    },
+    {
+      "id": "FIN-05",
+      "family": "threshold",
+      "pattern_label": "IF BETWEEN SUM_SPENT MONTH INCREASE",
+      "slots": {
+        "cat": "expense_category",
+        "pair": "money_pair",
+        "fund": "fund_goal",
+        "pct": "pct_point"
+      },
+      "ast": ["IF", ["BETWEEN", ["SUM_SPENT", "{cat}", "month"], "{pair.value}", "{pair.second}"], ["INCREASE", "{fund}", "{pct}"]],
+      "phrases": {
+        "it": "Se {cat} del mese resta tra {pair.value} e {pair.second}, aumenta il versamento {fund} del {pct}.",
+        "en": "If {cat} for the month stays between {pair.value} and {pair.second}, raise the transfer {fund} by {pct}.",
+        "fr": "Si {cat} du mois reste entre {pair.value} et {pair.second}, augmente le virement {fund} de {pct}.",
+        "es": "Si {cat} del mes se mantiene entre {pair.value} y {pair.second}, aumenta la transferencia {fund} en un {pct}.",
+        "de": "Wenn {cat} im Monat zwischen {pair.value} und {pair.second} bleibt, erhöhe die Überweisung {fund} um {pct}."
+      }
+    },
+    {
+      "id": "FIN-06",
+      "family": "frequency",
+      "pattern_label": "OCCASIONAL SKIP",
+      "slots": {
+        "rule": "money_rule"
+      },
+      "ast": ["OCCASIONAL", ["SKIP", "{rule}"]],
+      "phrases": {
+        "it": "Di tanto in tanto salta {rule}.",
+        "en": "Now and then skip {rule}.",
+        "fr": "De temps en temps saute {rule}.",
+        "es": "De vez en cuando salta {rule}.",
+        "de": "Gelegentlich überspringe {rule}."
+      }
+    },
+    {
+      "id": "FIN-07",
+      "family": "frequency",
+      "pattern_label": "NEARLY_ALWAYS MOVE MONTH_END",
+      "slots": {
+        "rule": "money_rule"
+      },
+      "ast": ["NEARLY_ALWAYS", ["MOVE", "{rule}", "month_end"]],
+      "phrases": {
+        "it": "Quasi ogni mese sposta {rule} a fine mese.",
+        "en": "Nearly every month move {rule} to the end of the month.",
+        "fr": "Presque chaque mois déplace {rule} à la fin du mois.",
+        "es": "Casi cada mes mueve {rule} a fin de mes.",
+        "de": "Fast jeden Monat verschiebe {rule} auf Monatsende."
+      }
+    },
+    {
+      "id": "FIN-08",
+      "family": "threshold",
+      "pattern_label": "IN_BAND LIMIT",
+      "slots": {
+        "cat": "expense_category",
+        "band": "time_band",
+        "amount": "money_amount"
+      },
+      "ast": ["IN_BAND", "{band}", ["LIMIT", "{cat}", "{amount}"]],
+      "phrases": {
+        "it": "{band} limita {cat} a {amount}.",
+        "en": "{band} cap {cat} at {amount}.",
+        "fr": "{band} plafonne {cat} à {amount}.",
+        "es": "{band} limita {cat} a {amount}.",
+        "de": "{band} begrenze {cat} auf {amount}."
+      }
+    },
+    {
+      "id": "FIN-09",
+      "family": "threshold",
+      "pattern_label": "IF NOT GTE SUM_SPENT LAST_N_DAYS TRANSFER",
+      "slots": {
+        "cat": "expense_category",
+        "n": "count_days_short",
+        "v": "money_amount",
+        "amount": "money_amount",
+        "fund": "fund_goal"
+      },
+      "ast": ["IF", ["NOT", ["GTE", ["SUM_SPENT", "{cat}", ["LAST_N_DAYS", "{n}"]], "{v}"]], ["TRANSFER", "{amount}", "{fund}"]],
+      "phrases": {
+        "it": "Se {cat} degli ultimi {n} non raggiunge {v}, versa {amount} {fund}.",
+        "en": "If {cat} of the last {n} stays under {v}, transfer {amount} {fund}.",
+        "fr": "Si {cat} sur {n} reste sous {v}, vire {amount} {fund}.",
+        "es": "Si {cat} de los últimos {n} no alcanza {v}, transfiere {amount} {fund}.",
+        "de": "Wenn {cat} der letzten {n} unter {v} bleibt, überweise {amount} {fund}."
+      }
+    },
+    {
+      "id": "FIN-10",
+      "family": "conditional",
+      "pattern_label": "IF LT BALANCE AND PAUSE ALERT",
+      "slots": {
+        "bal": "balance_level",
+        "rule": "money_rule",
+        "alert": "alert_channel"
+      },
+      "ast": ["IF", ["LT", "balance", "{bal}"], ["AND", ["PAUSE", "{rule}"], ["ALERT", "{alert}"]]],
+      "phrases": {
+        "it": "Se il saldo scende sotto {bal}, metti in pausa {rule} e mandami {alert}.",
+        "en": "If the balance drops below {bal}, pause {rule} and send me {alert}.",
+        "fr": "Si le solde descend sous {bal}, mets en pause {rule} et envoie-moi {alert}.",
+        "es": "Si el saldo baja de {bal}, pausa {rule} y mándame {alert}.",
+        "de": "Wenn das Guthaben unter {bal} fällt, pausiere {rule} und schick mir {alert}."
+      }
+    }
+  ]
+}
