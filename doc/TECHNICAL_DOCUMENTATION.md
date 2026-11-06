@@ -159,6 +159,25 @@ pytest -v tests/
 ```
 The repository includes `.github/workflows/ci.yml` running pytest and the synthesis pipeline on GitHub Actions across Python versions 3.10, 3.11, and 3.12.
 
+### 2.4 The `dataset/` Companion Folder, its Release and the Hub Artifacts
+
+`dataset/` is a companion folder: it holds a synthetic multilingual corpus (Italian, English, French, Spanish, German) built from 50 sentence templates over five everyday domains, plus the small scripts that generate, validate, train on and publish it. Nothing under `src/` reads it while the engine runs, and nothing in it changes the Dyck-2 engine: the bracket algebra it stores uses the same terminal alphabet as `src/neuro_symbolic`, which is why the trainer entry points reuse the existing parser, trainer, grammar and verifier modules unchanged.
+
+Corpus and tools are versioned in this repository. The packaged files are published as GitHub Release assets under incrementing tags: the first release is `dataset-v1`, the next ones continue as `dataset-v2`, `dataset-v3` and so on (`https://github.com/tailot/LingoLOGOS/releases/latest` always points at the newest). A release carries `lingologos-dataset.zip` (data, chat pairs, corpus, configs, templates, tools), `grammar.json`, `grammar.yaml`, `DatasetGrammar.gf`, `grammar-metrics.json` and `dataset-stats.json`. The files are free to download. `.github/workflows/dataset.yml` produces them in four stages: consistency check, grammar induction, an optional CPU fine-tuning smoke test, and the release itself.
+
+The training entry points of that folder, all of them thin wrappers over the modules documented above:
+
+| entry point | role |
+| --- | --- |
+| `dataset/tools/validate_dataset.py` | re-derives every bracket word, pattern and SMT text, and builds all 2,698 logical forms in Z3 |
+| `dataset/tools/train_grammar.py` | induces the PCFG over the corpus of the dataset with `DifferentiableCYKParser`, `GrammarTrainer`, `PCFGrammar` and `GrammarVerifier` |
+| `dataset/tools/train_sft.py` | LoRA fine-tuning of a chat model on the phrase pairs, plain PyTorch loop, prompt tokens masked out of the loss |
+| `dataset/tools/evaluate_sft.py` | generates answers on held-out rows and scores exact match, identical bracket tree, identical formal payload, balanced brackets |
+| `dataset/tools/publish_to_hub.py` | assembles the adapter, tokenizer files, model card and query script, and uploads them to the model repository on the Hub |
+| `dataset/tools/ask_model.py` | queries the trained model and verifies its answer: bracket balance, operator arities, solver consistency |
+
+The fine-tuning stage runs on a local machine with a GPU: GitHub-hosted runners have no GPU and a six hour job limit, so the pipeline only trains the grammar and a CPU smoke adapter. Model weights of third-party base models are never uploaded; only the adapter, its tokenizer files, the model card and the query script go to the Hub. Full commands and sizing for consumer cards are in `dataset/TRAINING.md` and in section 11 of `README.md`.
+
 ---
 
 ## 3. Mathematical Demonstrations and Concrete Proofs

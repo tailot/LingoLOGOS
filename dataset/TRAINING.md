@@ -117,8 +117,9 @@ which stays out of git. Use `--limit 0` to score all 1,350 test rows.
 To publish the result, compress the adapter folder and attach it to the release:
 
 ```powershell
-Compress-Archive -Path dataset\checkpoints\sft\* -DestinationPath chat-adapter.zip
-gh release upload dataset-v1 chat-adapter.zip --clobber
+New-Item -ItemType Directory -Force dist | Out-Null
+Compress-Archive -Path dataset\checkpoints\sft\* -DestinationPath dist\chat-adapter.zip
+gh release upload dataset-v1 dist\chat-adapter.zip --clobber
 ```
 
 ## 4. Regenerating or extending the dataset
@@ -162,5 +163,47 @@ templates, configurations, tools and the two documents), `grammar.json`,
 pipeline induced, with gates G1 to G4), plus `dataset-stats.json`.
 
 A full chat fine-tuning is deliberately not part of the pipeline: it needs a GPU
-and several gigabytes of download, so it remains a local run. Nothing is published
-to an external hub, and `dataset/checkpoints/` stays out of git.
+and several gigabytes of download, so it remains a local run. The pipeline itself
+publishes nothing to an external hub, and `dataset/checkpoints/` stays out of git.
+Publishing the adapter to the model repository is a separate local step, described next.
+
+## 6. Downloading a release, publishing the adapter, querying the model
+
+Anyone can take the corpus from a release of this repository. The first release is
+tagged `dataset-v1` and every later publication increments the tag (`dataset-v2`,
+`dataset-v3`, ...); `https://github.com/tailot/LingoLOGOS/releases/latest` is always the
+newest one.
+
+```powershell
+gh release download dataset-v1                        # every asset of that release
+gh release download dataset-v1 -r lingologos-dataset.zip
+```
+
+After a local training run, assemble and publish the files that make the adapter usable
+on `https://huggingface.co/tailot/LingoLOGOS`:
+
+```powershell
+python dataset/tools/publish_to_hub.py                 # preview: lists the staged files
+python dataset/tools/publish_to_hub.py --apply         # needs a write token in HF_TOKEN
+```
+
+The staging folder is `dataset/checkpoints/hf_repo/`, which is outside git. It holds the
+adapter and tokenizer files, the model card rendered from `dataset/hf_publish/MODEL_CARD.md`
+with the measured scores, `evaluation.json` and `ask_model.py`. Files that look like base
+model weights are refused by name or by size, so a third-party model is never uploaded by
+accident. The upload happens only with `--apply`, never on a preview.
+
+To use the trained model:
+
+```powershell
+python dataset/tools/ask_model.py --model Qwen/Qwen2.5-3B-Instruct --adapter dataset/checkpoints/sft --lang it --ask "Accendi la lampada della cucina solo se il livello di CO2 supera 50 percento"
+python dataset/tools/ask_model.py --model Qwen/Qwen2.5-3B-Instruct --adapter dataset/checkpoints/sft --lang de          # interactive loop
+python dataset/tools/ask_model.py --model Qwen/Qwen2.5-3B-Instruct --adapter dataset/checkpoints/sft --verbalize "( IF [ flag 1 ] [ dim_light ] )" --lang it
+```
+
+The script builds the prompt exactly as the training data did, reading the system message
+from the `sft/` files, then checks the answer: brackets balanced, every operator known
+with the right number of arguments against `templates/operators.json`, and whether the
+solver finds the conditions consistent. It can also go the other way, from a bracket tree
+to a sentence. Use `--cpu` to force the CPU and `--no-solver` to skip the Z3 step.
+

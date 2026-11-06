@@ -331,3 +331,87 @@ pytest -v tests/
 
 ### Continuous Integration (GitHub Actions)
 Tests and formal verification run automatically on push or pull requests via `.github/workflows/ci.yml` across Python **3.10**, **3.11**, and **3.12**.
+
+---
+
+## 11. Synthetic Multilingual Dataset, Fine-Tuning Runs and Published Files
+
+The folder `dataset/` is independent from the system described above: it holds a corpus
+plus the scripts that build and check it, and nothing in `src/` reads it while the
+assistant runs. It is a **hobby model built for fun on synthetic everyday routines**, not
+a component of the product. The sentences were generated from 50 patterns in five
+domains (home automation, agenda, finances, health, productivity), in Italian, English,
+French, Spanish and German: 13,490 phrases, 2,698 distinct meanings, each meaning written
+as a balanced word over `( ) [ ]`, which is the alphabet this engine induces.
+
+### Downloading the dataset
+
+The corpus and everything needed to rebuild it are published as assets of the GitHub
+releases, free to download. The first release is tagged **`dataset-v1`**; each new
+publication increments the tag (`dataset-v2`, `dataset-v3`, ...), and
+`https://github.com/tailot/LingoLOGOS/releases/latest` always points at the newest one.
+
+```bash
+gh release download dataset-v1                      # all assets of that release
+gh release download dataset-v1 -r lingologos-dataset.zip
+# or in a browser: https://github.com/tailot/LingoLOGOS/releases/tag/dataset-v1
+```
+
+A release carries `lingologos-dataset.zip` (data shards, chat pairs, Dyck-2 corpus,
+configs, templates, tools), `grammar.json`, `grammar.yaml`, `DatasetGrammar.gf`,
+`grammar-metrics.json` and `dataset-stats.json`.
+
+### Training on your own machine
+
+GitHub-hosted runners have no GPU and a six hour job limit, so the pipeline in
+`.github/workflows/dataset.yml` checks the corpus, induces the grammar and publishes the
+files; the chat fine-tuning runs on your GPU.
+
+```powershell
+python -m venv --system-site-packages .venv-train
+.\.venv-train\Scripts\Activate.ps1
+pip install "transformers>=4.52,<5" "huggingface-hub>=0.30,<1.0" peft accelerate
+
+python dataset/tools/validate_dataset.py            # consistency plus Z3 on every form
+python dataset/tools/train_grammar.py --epochs 90 --synthetic 900
+python dataset/tools/train_sft.py --model Qwen/Qwen2.5-3B-Instruct --limit 1000 --epochs 1 --batch-size 2 --grad-accum 8 --lr 2e-4 --max-seq-length 512 --grad-checkpointing --out-dir dataset/checkpoints/sft-probe
+python dataset/tools/train_sft.py --model Qwen/Qwen2.5-3B-Instruct --epochs 2 --batch-size 2 --grad-accum 8 --lr 2e-4 --max-seq-length 512 --grad-checkpointing --save-every 1000
+python dataset/tools/evaluate_sft.py --self-check   # scores the scorer, must be 100
+python dataset/tools/evaluate_sft.py --model Qwen/Qwen2.5-3B-Instruct --adapter dataset/checkpoints/sft --limit 200
+```
+
+Sizing on a 16 GB card: a seven billion parameter model in bfloat16 needs about 15 GB on
+its own, so it only fits with `--batch-size 1 --grad-accum 16 --max-seq-length 384
+--grad-checkpointing`, while a three billion parameter model runs comfortably at
+`--batch-size 2 --max-seq-length 512`. Time the probe run above and multiply by 24 to get
+one epoch over the full 24,280 rows. Outputs land in `dataset/checkpoints/`, which stays
+out of git. `dataset/TRAINING.md` documents every flag and the environment problem with
+`huggingface-hub 1.33`.
+
+### Using the trained model
+
+`evaluate_sft.py` answers the only question that matters: how often the model produces
+the exact bracket tree of a sentence (`structure`) and how often its brackets are
+balanced at all (`well formed`), split by language, task and domain. `ask_model.py`
+queries the model the way it was trained and then verifies the answer: bracket balance,
+operator arities from `dataset/templates/operators.json`, and whether the solver finds
+the conditions consistent.
+
+```powershell
+python dataset/tools/ask_model.py --model Qwen/Qwen2.5-3B-Instruct --adapter dataset/checkpoints/sft --lang it --ask "Accendi la lampada della cucina solo se il livello di CO2 supera 50 percento"
+python dataset/tools/ask_model.py --model Qwen/Qwen2.5-3B-Instruct --adapter dataset/checkpoints/sft --lang de
+python dataset/tools/publish_to_hub.py                # preview of the hub files
+python dataset/tools/publish_to_hub.py --apply        # upload to the hub model repository
+```
+
+`publish_to_hub.py` sends only the files that make the adapter usable, to
+`https://huggingface.co/tailot/LingoLOGOS`: the adapter and tokenizer files, the model
+card generated from `dataset/hf_publish/MODEL_CARD.md`, the measured scores and
+`ask_model.py`. It refuses large weight files, so nobody uploads a third-party base
+model by accident, and it only writes to the hub when you pass `--apply` with a write
+token in `HF_TOKEN`. To attach the adapter to a GitHub release instead:
+
+```powershell
+Compress-Archive -Path dataset\checkpoints\sft\* -DestinationPath dist\chat-adapter.zip
+gh release upload dataset-v1 dist\chat-adapter.zip --clobber
+```

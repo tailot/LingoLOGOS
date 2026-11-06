@@ -53,14 +53,28 @@ python dataset/tools/validate_dataset.py      # re-checks every consistency rule
 python dataset/tools/train_grammar.py         # induces the grammar of the algebra
 python dataset/tools/train_sft.py             # fine-tunes a chat model on the pairs
 python dataset/tools/evaluate_sft.py          # scores a trained model on held-out rows
+python dataset/tools/ask_model.py             # queries the model and checks its answer
+python dataset/tools/publish_to_hub.py        # prepares the adapter files for the hub
 ```
 
-Details, hyperparameters and the environment to use: see [TRAINING.md](TRAINING.md).
+This folder is also published as a release of the repository, free to download: the
+first release is tagged `dataset-v1` and the tags increment from there (`dataset-v2`,
+`dataset-v3`, ...), with `releases/latest` pointing at the newest.
+
+```bash
+gh release download dataset-v1 -r lingologos-dataset.zip
+```
+
+`publish_to_hub.py` uploads only the files that make a trained adapter usable (adapter,
+tokenizer files, model card, measured scores, `ask_model.py`) to the model repository on
+the hub; base model weights are refused. Details, hyperparameters and the environment to
+use: see [TRAINING.md](TRAINING.md).
 
 The same steps also run in GitHub Actions, in `.github/workflows/dataset.yml`:
 the corpus is checked, the grammar is induced on it, and the packaged files are
-published at the end in a GitHub Release of this repository. No external hub is
-involved.
+published at the end in a GitHub Release of this repository. The workflow itself
+touches no external hub; pushing a trained adapter to the model repository is a
+separate local step with `publish_to_hub.py`.
 
 ## Notes for the reader
 
