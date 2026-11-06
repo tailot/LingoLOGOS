@@ -1,0 +1,142 @@
+{
+  "config": {
+    "seed": 42,
+    "init": "prior",
+    "num_nt": 5,
+    "vocab": [
+      "(",
+      ")",
+      "[",
+      "]"
+    ],
+    "nt_labels": [
+      "S",
+      "OPN_R",
+      "CLS_R",
+      "OPN_S",
+      "CLS_S"
+    ],
+    "epochs": 60,
+    "batch_size": 8,
+    "lr": 0.01,
+    "tau": 0.5,
+    "tau_start": 1.0,
+    "entropy_penalty": 0.5,
+    "weight_decay": 0.0001,
+    "prune_threshold": 0.01,
+    "search_bound": 6,
+    "num_samples": 100,
+    "train_size": 75,
+    "test_size": 25,
+    "max_depth": 3,
+    "max_length": 12
+  },
+  "metrics_train": {
+    "mean_nll_per_symbol": 1.0684139067126859,
+    "ppl_per_symbol": 2.910759101282412,
+    "model_coverage": 1.0,
+    "rule_sparsity": 0.9172413793103448,
+    "max_lhs_mass_error": 1.1920928955078125e-07
+  },
+  "metrics_test": {
+    "mean_nll_per_symbol": 1.0505817707138831,
+    "ppl_per_symbol": 2.859314099484189,
+    "model_coverage": 1.0,
+    "rule_sparsity": 0.9172413793103448,
+    "max_lhs_mass_error": 1.1920928955078125e-07
+  },
+  "grammar": {
+    "num_rules": 9,
+    "num_binary_rules": 5,
+    "num_terminal_rules": 4,
+    "non_terminals": [
+      "S",
+      "OPN_R",
+      "CLS_R",
+      "OPN_S",
+      "CLS_S"
+    ],
+    "valid_pcfg": true,
+    "lhs_masses": {
+      "S": 1.0,
+      "OPN_R": 1.0,
+      "CLS_R": 1.0,
+      "OPN_S": 1.0,
+      "CLS_S": 1.0
+    },
+    "lark_compiles": true
+  },
+  "language": {
+    "corpus_coverage": 1.0,
+    "corpus_failures": [],
+    "negative_controls": 200,
+    "negative_rejection_rate": 1.0,
+    "negatives_wrongly_accepted": [],
+    "gold_rule_precision": 1.0,
+    "gold_rule_recall": 1.0,
+    "gold_rule_f1": 1.0,
+    "gold_rule_details": {
+      "alignment": {
+        "S": "S",
+        "OPN_R": "OPN_R",
+        "CLS_R": "CLS_R",
+        "OPN_S": "OPN_S",
+        "CLS_S": "CLS_S"
+      },
+      "gold_rules": 9,
+      "induced_rules": 9,
+      "matched": 9,
+      "missing": [],
+      "spurious": []
+    }
+  },
+  "soundness": {
+    "status": "UNSAT",
+    "sound": true,
+    "certificate": {
+      "S": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "OPN_R": [
+        1,
+        0,
+        1,
+        0
+      ],
+      "CLS_R": [
+        -1,
+        0,
+        -1,
+        0
+      ],
+      "OPN_S": [
+        0,
+        1,
+        0,
+        1
+      ],
+      "CLS_S": [
+        0,
+        -1,
+        0,
+        -1
+      ]
+    },
+    "counterexample": null,
+    "derivation": null,
+    "search_bound": 6,
+    "notes": [
+      "valid inductive certificate for every production",
+      "no counterexample"
+    ]
+  },
+  "gates": {
+    "G1_grammar_valid": true,
+    "G2_corpus_coverage_100": true,
+    "G3_negative_controls_rejected": true,
+    "G4_z3_unsat_certificate": true
+  }
+}
