@@ -4,11 +4,19 @@ Conforme alle sezioni 4, 5, 6, 8 e 9 della specifica tecnica.
 """
 
 import os
+import sys
+from pathlib import Path
+
+# Assicura che la root del repository sia presente in sys.path
+repo_root = str(Path(__file__).resolve().parent.parent.parent)
+if repo_root not in sys.path:
+    sys.path.insert(0, repo_root)
+
 import torch
-from src.neuro_symbolic.parser import DifferentiableCYKParser
-from src.neuro_symbolic.grammar import PCFGrammar, ProductionRule, Symbol
-from src.neuro_symbolic.trainer import DyckDataset, GrammarTrainer
-from src.neuro_symbolic.verification import GrammarVerifier
+from neuro_symbolic.parser import DifferentiableCYKParser
+from neuro_symbolic.grammar import PCFGrammar, ProductionRule, Symbol
+from neuro_symbolic.trainer import DyckDataset, GrammarTrainer
+from neuro_symbolic.verification import GrammarVerifier
 
 
 def main():

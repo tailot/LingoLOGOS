@@ -74,13 +74,14 @@ src/neuro_symbolic/
 
 Installazione rapida tramite pip:
 ```bash
-pip install torch z3-solver lark pyyaml numpy pytest
+pip install -r requirements.txt
+pip install -e .
 ```
 
 ### 2.2 Esecuzione della Pipeline di Addestramento e Generazione Artefatti
 Per addestrare il modello, estrarre la grammatica simbolica ed effettuare le 4 verifiche di collaudo:
 ```bash
-PYTHONPATH=. python3 src/neuro_symbolic/synthesize.py
+python3 src/neuro_symbolic/synthesize.py
 ```
 L'esecuzione genererà all'interno della cartella `artifacts/`:
 1. `artifacts/grammar_weights.pt`: pesi PyTorch del modello addestrato.
@@ -88,11 +89,13 @@ L'esecuzione genererà all'interno della cartella `artifacts/`:
 3. `artifacts/grammar.yaml`: artefatto YAML conforme alla specifica tecnica.
 4. `artifacts/DynamicGrammarIta.gf`: modulo astratto/concreto per Grammatical Framework.
 
-### 2.3 Esecuzione dei Test di Regressione
-Per verificare che l'intero sistema rispetti tutti i contratti API e matematici:
+### 2.3 Esecuzione dei Test di Regressione e CI su GitHub Actions
+Grazie alla configurazione standard in `pyproject.toml`, i test di regressione possono essere eseguiti localmente semplicemente con:
 ```bash
-PYTHONPATH=. pytest -v tests/
+pytest -v tests/
 ```
+
+Il progetto include il file di workflow `.github/workflows/ci.yml` che esegue automaticamente la suite di test completa e la pipeline di sintesi su GitHub Actions per ogni commit e Pull Request attraverso una matrice di versioni Python (3.10, 3.11, 3.12).
 
 ---
 

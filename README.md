@@ -267,17 +267,21 @@ Il processo di collaudo garantisce la **Soundness al 100%** e l'assenza di alluc
 
 Installazione dipendenze:
 ```bash
-pip install torch z3-solver lark pyyaml numpy pytest
+pip install -r requirements.txt
+pip install -e .
 ```
 
 ### Esecuzione della Sintesi e Generazione Artefatti
 Per addestrare il parser sul linguaggio Dyck-2, calcolare le metriche, esportare la grammatica ed eseguire il collaudo formale:
 ```bash
-PYTHONPATH=. python3 src/neuro_symbolic/synthesize.py
+python3 src/neuro_symbolic/synthesize.py
 ```
 
 ### Esecuzione dei Test
-Per eseguire la suite di test completa:
+Grazie alla configurazione in `pyproject.toml`, i test possono essere eseguiti direttamente con:
 ```bash
-PYTHONPATH=. pytest -v tests/
+pytest -v tests/
 ```
+
+### Integrazione Continua (GitHub Actions)
+I test e la pipeline di sintesi formale vengono eseguiti automaticamente su GitHub ad ogni push o pull request tramite il workflow configurato in `.github/workflows/ci.yml` su matrice di runtime Python **3.10**, **3.11** e **3.12**.
