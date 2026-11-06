@@ -209,6 +209,8 @@ documentation cannot drift away from the code). Its contract:
 │       ├── grammar.py             # PCFGrammar, Symbol, ProductionRule, CYK derive, JSON/YAML/GF/Lark exporters
 │       ├── trainer.py             # DyckDataset (train/test split) & GrammarTrainer (AdamW, annealing)
 │       ├── reference.py           # Gold Dyck-2 CNF, gold prior init, negative controls, gold rule F1
+│       ├── tokenizer.py           # Byte-pair vocabulary trained from scratch, protected formal alphabet
+│       ├── masking.py             # Symbolic decoding mask: prefix automaton plus token-level logits mask
 │       ├── verification.py        # GrammarVerifier (Lark, coverage, negative controls, Z3 inclusion)
 │       └── synthesize.py          # End-to-end synthesis, verification gates and export pipeline
 ├── tests/
@@ -216,12 +218,18 @@ documentation cannot drift away from the code). Its contract:
 │   ├── test_grammar.py            # Serialization, pruning, post-pruning renormalization, derive()
 │   ├── test_trainer.py            # Training loop, train/test split, metric definitions
 │   ├── test_reference.py          # Gold CNF, negative controls, gold rule F1 sanity
+│   ├── test_tokenizer.py          # Lossless pre-tokenization, protected atoms, one token per symbol
+│   ├── test_masking.py            # Legal language, refused mutations, logits mask, protocol markers
 │   └── test_verification.py       # Z3 certificate (UNSAT) and refutation of over-generating grammars
 ├── AGENTS.md                      # Mandatory instructions for AI agents
 ├── pyproject.toml                 # Build metadata, packaging, and pytest configuration
 ├── requirements.txt               # Project dependencies
 └── README.md                      # System documentation
 ```
+
+The companion `dataset/` folder (corpus, chat pairs, Dyck-2 corpus, templates, and the tools that
+validate it, learn its vocabulary and check its decoding mask) is documented in section 11 and in
+`dataset/README.md`.
 
 ---
 
@@ -331,18 +339,24 @@ pytest -v tests/
 
 ### Continuous Integration (GitHub Actions)
 Tests and formal verification run automatically on push or pull requests via `.github/workflows/ci.yml` across Python **3.10**, **3.11**, and **3.12**.
+The companion pipeline `.github/workflows/dataset.yml` runs on changes under `dataset/`: corpus consistency, the tokenizer gates `T1`-`T5`, the mask gates `M1`-`M5`, grammar induction, and the GitHub Release that carries the artifacts.
 
 ---
 
-## 11. Synthetic Multilingual Dataset, Fine-Tuning Runs and Published Files
+## 11. Synthetic Multilingual Dataset and the Pure Model Track
 
 The folder `dataset/` is independent from the system described above: it holds a corpus
 plus the scripts that build and check it, and nothing in `src/` reads it while the
-assistant runs. It is a **hobby model built for fun on synthetic everyday routines**, not
-a component of the product. The sentences were generated from 50 patterns in five
-domains (home automation, agenda, finances, health, productivity), in Italian, English,
-French, Spanish and German: 13,490 phrases, 2,698 distinct meanings, each meaning written
-as a balanced word over `( ) [ ]`, which is the alphabet this engine induces.
+assistant runs. It is the training ground of a **hobby assistant built for fun on synthetic
+everyday routines**, not a component of the product. The sentences were generated from 50
+patterns in five domains (home automation, agenda, finances, health, productivity), in
+Italian, English, French, Spanish and German: 13,490 phrases, 2,698 distinct meanings, each
+meaning written as a balanced word over `( ) [ ]`, which is the alphabet this engine induces.
+
+The assistant trained on it is a **pure model**: no pretrained checkpoint, no external
+vocabulary, no third-party weights anywhere in this repository. Phases 1 and 2 of that track
+are implemented and gated, phases 3 to 5 are specified and not built yet, and the whole plan
+with its measured corrections is `doc/PURE_MODEL_ROADMAP.md`.
 
 ### Downloading the dataset
 
@@ -359,59 +373,113 @@ gh release download dataset-v1 -r lingologos-dataset.zip
 
 A release carries `lingologos-dataset.zip` (data shards, chat pairs, Dyck-2 corpus,
 configs, templates, tools), `grammar.json`, `grammar.yaml`, `DatasetGrammar.gf`,
-`grammar-metrics.json` and `dataset-stats.json`.
+`grammar-metrics.json`, `tokenizer.json` and `tokenizer-metrics.json` (the vocabulary learned
+from this corpus), `masking-metrics.json` (the symbolic decoding gates) and
+`dataset-stats.json`.
 
-### Training on your own machine
+### Running the dataset pipeline
 
-GitHub-hosted runners have no GPU and a six hour job limit, so the pipeline in
-`.github/workflows/dataset.yml` checks the corpus, induces the grammar and publishes the
-files; the chat fine-tuning runs on your GPU.
+GitHub-hosted runners have no GPU and a six hour job limit, so `.github/workflows/dataset.yml`
+runs everything that fits on a CPU (corpus consistency, the tokenizer gates, the mask gates, the
+grammar induction) and then publishes the files. Neural training, which is phase 4 below, belongs
+to your own machine.
 
 ```powershell
-python -m venv --system-site-packages .venv-train
-.\.venv-train\Scripts\Activate.ps1
-pip install "transformers>=4.52,<5" "huggingface-hub>=0.30,<1.0" peft accelerate
-
 python dataset/tools/validate_dataset.py            # consistency plus Z3 on every form
 python dataset/tools/train_grammar.py --epochs 90 --synthetic 900
-python dataset/tools/train_sft.py --model Qwen/Qwen2.5-3B-Instruct --limit 1000 --epochs 1 --batch-size 2 --grad-accum 8 --lr 2e-4 --max-seq-length 512 --grad-checkpointing --out-dir dataset/checkpoints/sft-probe
-python dataset/tools/train_sft.py --model Qwen/Qwen2.5-3B-Instruct --epochs 2 --batch-size 2 --grad-accum 8 --lr 2e-4 --max-seq-length 512 --grad-checkpointing --save-every 1000
-python dataset/tools/evaluate_sft.py --self-check   # scores the scorer, must be 100
-python dataset/tools/evaluate_sft.py --model Qwen/Qwen2.5-3B-Instruct --adapter dataset/checkpoints/sft --limit 200
 ```
 
-Sizing on a 16 GB card: a seven billion parameter model in bfloat16 needs about 15 GB on
-its own, so it only fits with `--batch-size 1 --grad-accum 16 --max-seq-length 384
---grad-checkpointing`, while a three billion parameter model runs comfortably at
-`--batch-size 2 --max-seq-length 512`. Time the probe run above and multiply by 24 to get
-one epoch over the full 24,280 rows. Outputs land in `dataset/checkpoints/`, which stays
-out of git. `dataset/TRAINING.md` documents every flag and the environment problem with
-`huggingface-hub 1.33`.
+### Phase 1 -- a vocabulary learned from this corpus (implemented and gated)
 
-### Using the trained model
-
-`evaluate_sft.py` answers the only question that matters: how often the model produces
-the exact bracket tree of a sentence (`structure`) and how often its brackets are
-balanced at all (`well formed`), split by language, task and domain. `ask_model.py`
-queries the model the way it was trained and then verifies the answer: bracket balance,
-operator arities from `dataset/templates/operators.json`, and whether the solver finds
-the conditions consistent.
+`src/neuro_symbolic/tokenizer.py` is a byte-pair vocabulary written from scratch, with the formal
+alphabet protected: brackets, operator names and leaf tags are single tokens that no merge may ever
+join, while ordinary words are learned from the text. Nothing is downloaded; `load` even refuses a
+vocabulary whose format id is not `lingologos-bpe-1`.
 
 ```powershell
-python dataset/tools/ask_model.py --model Qwen/Qwen2.5-3B-Instruct --adapter dataset/checkpoints/sft --lang it --ask "Accendi la lampada della cucina solo se il livello di CO2 supera 50 percento"
-python dataset/tools/ask_model.py --model Qwen/Qwen2.5-3B-Instruct --adapter dataset/checkpoints/sft --lang de
-python dataset/tools/publish_to_hub.py                # preview of the hub files
-python dataset/tools/publish_to_hub.py --apply        # upload to the hub model repository
+python dataset/tools/train_tokenizer.py --vocab-size 6000
 ```
 
-`publish_to_hub.py` sends only the files that make the adapter usable, to
-`https://huggingface.co/tailot/LingoLOGOS`: the adapter and tokenizer files, the model
-card generated from `dataset/hf_publish/MODEL_CARD.md`, the measured scores and
-`ask_model.py`. It refuses large weight files, so nobody uploads a third-party base
-model by accident, and it only writes to the hub when you pass `--apply` with a write
-token in `HF_TOKEN`. To attach the adapter to a GitHub release instead:
+The tool trains on the training split only and measures train, valid and test, writing
+`dataset/checkpoints/tokenizer/tokenizer.json` and `metrics.json`:
+
+| measured on the shipped corpus | value |
+| :--- | :--- |
+| training texts / pre-tokenized units | 72,840 / 5,214,389 |
+| word types, atomic units, atomic types | 1,578 / 3,040,076 / 268 |
+| learned merges | 3,578 (`no mergeable pair left`) |
+| vocabulary size | **3,921**, saturation point (`saturated_at: 3921`) |
+| round trip failures, unknown tokens | 0, 0 (over 5,786,067 produced tokens) |
+| formal symbols that stay one token | 267 of 267, on every split |
+| bracket words re-encoded exactly | 13,490 checked, 0 broken |
+
+Gates `T1` reversible pre-tokenization, `T2` no unknown token, `T3` atomic alphabet, `T4` alphabet
+generalizes to held-out data, `T5` algebra round trip: all pass.
+
+### Phase 2 -- the symbolic decoding mask (implemented and gated)
+
+`src/neuro_symbolic/masking.py` builds a stack automaton over the *symbol* alphabet that admits
+exactly the legal bracket algebra: the root must be a round node, brackets must be matched, a round
+node must hold exactly as many children as the arity in `dataset/templates/operators.json`, and a
+leaf must match the payload shape observed in the corpus. Because an operator name reveals its
+arity immediately, admissibility is decidable from the prefix alone, so the mask is a function of
+the prefix and can be applied to the logits at every decoding step.
 
 ```powershell
-Compress-Archive -Path dataset\checkpoints\sft\* -DestinationPath dist\chat-adapter.zip
-gh release upload dataset-v1 dist\chat-adapter.zip --clobber
+python dataset/tools/verify_masking.py --samples 300 --refine
+```
+
+The tool checks the automaton against an **independent oracle** (it reuses `logic_map.is_well_bracketed`,
+the registry arities and an independent reader, never the mask itself), writing
+`dataset/checkpoints/masking/masking_metrics.json`:
+
+| gate | measured |
+| :--- | :--- |
+| `M1` held-out algebra accepted | 1,350 of 1,350 |
+| `M2` mutated streams refused | 16,350 of 16,350 (crossed bracket, deleted or inserted bracket, truncation, unknown operator, wrong arity, oversized leaf) |
+| `M3` sampled streams that are legal trees | 300 of 300 |
+| `M4` registry agrees with the corpus | 52 distinct operator and arity pairs observed in the corpus all match the registry, 0 serialization mismatch |
+| `M5` token-level protocol | 67,190 of 67,190 gold decisions accepted, closing marker forced at completeness 1,350 times and offered out of place 0 times |
+
+With `--refine` the extra rule "which child kind sits at which position" is learned from the
+training split only (83 refined pairs) and the held-out split is still accepted 1,350 of 1,350, so
+the narrowing is sound. Two honest caveats are in the metrics file: `unknown_leaf` controls were
+all discarded because every held-out leaf is inside the training alphabet, and one of the 53
+registered operators never occurs in the corpus.
+
+### What the model will speak
+
+The target sequence is the algebra itself, framed by the special tokens:
+
+```
+<RULE_START> ( IF [ flag 1 ] [ day mon ] ) <RULE_END> <EOS>
+```
+
+one symbol per token, single spaces between symbols. Each dataset meaning is stored in four
+renderings, and the other three (semantic pattern, GF abstraction, SMT assertion) are derived
+deterministically from that tree by `dataset/tools/logic_map.py`, so the model never has to
+generate JSON or SMT text: one object to learn, three guaranteed views of it.
+
+### Phases 3 to 5 -- not built yet
+
+The network (6 encoder plus 6 decoder layers, 8 heads, `d_model` 512, `d_ff` 2048, dropout 0.1,
+stochastic initialization), its training loop with the masked cross-entropy, and the Z3 benchmark of
+generated answers are still to be written. `doc/PURE_MODEL_ROADMAP.md` holds the design, the
+hyperparameters, the phase-by-phase plan and the corrections listed below.
+
+### Corrections to the specification, measured rather than assumed
+
+| the specification says | what this corpus and machine give |
+| :--- | :--- |
+| vocabulary `V` of 8,000 to 32,000 | the byte-pair vocabulary **saturates at 3,921** (1,578 word types, 3,040,076 atomic units): any target above that is unreachable, so `V = 3,921` is the number to size the embedding on |
+| warmup of 4,000 steps | one epoch over the 12,140 training pairs is 95 steps at batch 128, so 4,000 steps of warmup would be about 42 epochs of warmup; warmup has to be a fraction of an epoch, not a fixed 4,000 |
+| cosine decay of the learning rate | planned as documented; the grammar trainer in this repository anneals linearly with a temperature schedule, and the pure model loop will state its schedule explicitly instead |
+| loss `L = L_CE + lambda * L_Symbolic` with `lambda = 0.1` | with the hard mask of phase 2 the invalid region already has zero probability mass, so the penalty term is redundant: keep it as an optional ablation, not as the mechanism that enforces legality |
+| minimum hardware: RTX 3090 or A100, 16 GB | the development machine has an RTX 5070 Ti with 16,303 MiB and PyTorch 2.14.1+cu130 with CUDA available, which matches the 16 GB budget; the phase 3 network is about 48 million parameters (6 encoder plus 6 decoder layers at `d_model` 512), so weights, gradients and AdamW states are well under 1 GB and memory is not the constraint |
+
+### Attaching artifacts to a GitHub release
+
+```powershell
+Compress-Archive -Path dataset\checkpoints\tokenizer\* -DestinationPath dist\tokenizer.zip
+gh release upload dataset-v1 dist\tokenizer.zip --clobber
 ```

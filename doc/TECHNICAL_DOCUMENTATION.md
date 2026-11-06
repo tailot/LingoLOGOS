@@ -15,6 +15,8 @@ src/neuro_symbolic/
 ├── grammar.py           # PCFGrammar, ProductionRule, Symbol, pruning + renormalization, derive(), exporters
 ├── trainer.py           # DyckDataset (train/test split), GrammarTrainer (NLL + mixture entropy, annealing)
 ├── reference.py         # Gold Dyck-2 CNF, gold prior initialization, negative controls, gold rule F1
+├── tokenizer.py         # Byte-pair vocabulary learned from scratch: atomic algebra alphabet, lossless round trip
+├── masking.py           # Symbolic decoding mask: prefix automaton of the legal algebra, then token-level logits mask
 ├── verification.py      # GrammarVerifier: Lark, PCFG invariant, CYK coverage, negative controls, Z3 inclusion
 └── synthesize.py        # End-to-end synthesis, acceptance gates (G1-G4) and artifact export pipeline
 ```
@@ -103,6 +105,94 @@ src/neuro_symbolic/
 - `counter_signature(tokens)` / `is_well_bracketed(tokens)`: the counter abstraction and its invariant, shared by the certificate and the witness check.
 - `check_word_balance_z3(tokens)`: diagnostic only, for a single string. The prefix invariant sits in the **thesis** and premise consistency is guarded (`INCONSISTENT_PREMISES`), because the previous encoding put the invariant among the *premises*: for `())`, `)(` and `][` the premise set was inconsistent, so `UNSAT` was returned vacuously and the check reported "sound" for malformed strings. `tests/test_verification.py` locks this regression.
 
+### 1.6 `tokenizer.py` - Vocabulary Learned From the Corpus, Not Imported
+
+The pure model track (see `doc/PURE_MODEL_ROADMAP.md` and section 11 of `README.md`) needs a
+subword vocabulary that is **trained on this corpus** with no pretrained artifact anywhere.
+`tokenizer.py` implements that vocabulary, format id `lingologos-bpe-1`, in plain Python: no
+`from_pretrained` call exists in this repository and the file has no dependency outside the
+standard library.
+
+- **Special tokens**: `<PAD>`, `<UNK>`, `<BOS>`, `<EOS>`, `<RULE_START>`, `<RULE_END>`, the six
+  entries of `SPECIAL_TOKENS`; ids are reserved first so that they never collide with learned pieces.
+- **Hybrid (protected-atom) byte-pair encoding**. Pre-tokenization is the reversible split
+  `_UNIT_PATTERN = \w+ | \s+ | [^\w\s]`, so `" ".join(pre_tokenize(text)) == text` holds by
+  construction and no character is ever dropped or invented. A unit is **atomic** when it is a
+  whitespace run, a run of digits, one of the four algebra brackets, a declared operator or leaf
+  name, or any other unit observed in the corpus that the caller declared atomic. Atomic units are
+  put in the vocabulary whole and are **never touched by a merge**: merges only ever combine pieces
+  inside one word unit. This keeps the formal alphabet exactly one token per symbol, which is what
+  the decoding mask of section 1.7 assumes.
+- **Vocabulary construction**: specials, then the four brackets, then the declared atomic symbols
+  and every atomic unit observed in the training texts, then the base characters (space, newline,
+  carriage return, tab, digits). Merges are then greedy and deterministic: the pair with the highest
+  frequency, ties broken by the pair itself in ascending order, is appended repeatedly until the
+  target size is reached, no mergeable pair is left, or the best pair falls below `min_frequency`.
+  `stop_reason` records which case happened.
+- **Measured behaviour on the shipped corpus** (`python dataset/tools/train_tokenizer.py`, gate
+  output in `dataset/checkpoints/tokenizer/metrics.json`): 72,840 training texts and 5,214,389
+  pre-tokenized units give 1,578 word types and 3,040,076 atomic units (268 atomic types), and the
+  vocabulary **saturates at 3,921 entries with 3,578 merges** (`stop_reason: no mergeable pair
+  left`). A target of 8,000 to 32,000 pieces, as usually written for text models, is not reachable
+  on this corpus: the requested range is above saturation, so the honest number is the saturation
+  point. Gates `T1` reversibility, `T2` zero unknown tokens (`0` over 5,786,067 produced tokens),
+  `T3` every formal symbol atomic (267 of 267), `T4` algebra symbols of the held-out splits already
+  in the vocabulary, `T5` bracket-word round trip (`13,490` checked, `0` broken) all pass.
+- **Serialization**: `save` / `load` write and read a single UTF-8 JSON document with the format id,
+  the vocabulary, the merge list and the statistics; `load` refuses a document whose format id is
+  not `lingologos-bpe-1`, so a foreign vocabulary cannot be mistaken for this one.
+
+### 1.7 `masking.py` - The Symbolic Constraint That Replaces the Penalty Term
+
+The specification asks for a symbolic term in the loss and for masked logits
+$L_{t,i} = -\infty$ when token $i$ is not admissible after prefix $t$. `masking.py` makes that
+constraint *exact* rather than soft, and it is deliberately **model-free**: it contains no neural
+module, so it is importable and testable before any network exists.
+
+- **Two levels.** `AlgebraMask` is a stack automaton over the *symbol* alphabet (four brackets, the
+  53 operator names, the leaf tags and leaf payloads). `TokenStreamMask` lifts it to the vocabulary
+  of section 1.6, emitting the canonical protocol `<RULE_START> s1 s2 ... sn <RULE_END> <EOS>` with
+  exactly one space token between two symbols.
+- **Why the automaton is prefix-deterministic.** The arities live in `dataset/templates/operators.json`
+  and every operator name has fixed arity, so after the symbol that follows `(` the number of
+  remaining children is known and with it every closing bracket of that subtree. A leaf is `[`
+  followed by a tag and payload tokens whose admissible lengths come from a *shape profile* learned
+  from the corpus, so the position of `]` is decidable from the prefix alone. Consequence: the set of
+  admissible next symbols is a function of the prefix, no backtracking needed, and legality can be
+  decided in one left-to-right pass.
+- **Admissible language.** A stream is accepted exactly when it is the canonical serialization
+  `logic_map.bracket_ast(tree)` of a well-typed tree: root is always a round node, brackets are
+  properly matched (Dyck-2 with `(` `)` and `[` `]`), a round node holds exactly `arity(name)`
+  children, a leaf never nests, and the leaf payload length is in the observed profile. `validate_stream`
+  returns the tree, so acceptance is constructive; `sample_stream` draws uniformly over the legal
+  continuations with a depth budget, which yields guaranteed-legal training data.
+- **Token-level mask.** `mask_logits(logits, prefix_ids)` fills the rows outside the admissible set
+  with $-\infty$ and leaves the admissible scores untouched, so `softmax` is a distribution over the
+  legal choices only and the entropy of the policy is measured on real alternatives. A vector that is
+  narrower than the vocabulary, or a batch of logits, is a hard error rather than a silent slice.
+  `<RULE_END>` is offered *only* when the automaton is complete, and after it only `<EOS>`; the
+  automaton never offers a second root.
+- **Measured behaviour** (`python dataset/tools/verify_masking.py --refine`, gate output in
+  `dataset/checkpoints/masking/masking_metrics.json`): mask alphabet 53 operators, 136 leaf tags,
+  75 payload tokens, leaf length profile `{1: 135, 2: 1}`, 268 vocabulary tokens for the masked
+  alphabet. `M1` held-out algebra: 1,350 of 1,350 accepted. `M2` negative controls: 16,350 mutated
+  streams, 16,350 refused against an **independent** oracle that reuses `logic_map.is_well_bracketed`,
+  the registry arities and the reader of `logic_map` instead of the mask itself; mutations the oracle
+  judges legal are discarded instead of being counted, which is why `unknown_leaf` reports 0 kept out
+  of 2,700 attempts (the held-out leaves are all inside the training alphabet). `M3` 300 sampled
+  streams, 300 valid trees and 300 well bracketed. `M4` 52 distinct operator/arity pairs observed in
+  the corpus agree with the registry, 0 mismatch (of 53 registered operators, one never occurs in the
+  corpus). `M5` token protocol: 67,190 gold decisions on the held-out split, 67,190 accepted, closing
+  marker forced at completeness 1,350 times, premature closing marker offered 0 times. With
+  `--refine` the extra restriction "which child kind sits at which position" is learned from the
+  training split only (83 refined `(operator, position)` pairs) and the held-out split is still fully
+  accepted, so the refinement is sound and not over-fitted to the test data.
+- **Consequence for the loss.** With the hard mask in place during both training and inference, the
+  symbolic term $\lambda L_{\mathrm{Symbolic}}$ of the specification becomes redundant rather than
+  wrong: the invalid region of the output space has zero probability mass by construction, so the
+  cross-entropy alone already operates on legal continuations. The mask is therefore the primary
+  mechanism, and a soft penalty stays optional.
+
 ---
 
 ## 2. Step-by-Step Configuration and Training Guide
@@ -159,24 +249,22 @@ pytest -v tests/
 ```
 The repository includes `.github/workflows/ci.yml` running pytest and the synthesis pipeline on GitHub Actions across Python versions 3.10, 3.11, and 3.12.
 
-### 2.4 The `dataset/` Companion Folder, its Release and the Hub Artifacts
+### 2.4 The `dataset/` Companion Folder and its Release
 
-`dataset/` is a companion folder: it holds a synthetic multilingual corpus (Italian, English, French, Spanish, German) built from 50 sentence templates over five everyday domains, plus the small scripts that generate, validate, train on and publish it. Nothing under `src/` reads it while the engine runs, and nothing in it changes the Dyck-2 engine: the bracket algebra it stores uses the same terminal alphabet as `src/neuro_symbolic`, which is why the trainer entry points reuse the existing parser, trainer, grammar and verifier modules unchanged.
+`dataset/` is a companion folder: it holds a synthetic multilingual corpus (Italian, English, French, Spanish, German) built from 50 sentence templates over five everyday domains, plus the small scripts that generate, validate, and learn from it. Nothing under `src/` reads it while the engine runs, and nothing in it changes the Dyck-2 engine: the bracket algebra it stores uses the same terminal alphabet as `src/neuro_symbolic`, which is why the trainer entry points reuse the existing parser, trainer, grammar and verifier modules unchanged.
 
-Corpus and tools are versioned in this repository. The packaged files are published as GitHub Release assets under incrementing tags: the first release is `dataset-v1`, the next ones continue as `dataset-v2`, `dataset-v3` and so on (`https://github.com/tailot/LingoLOGOS/releases/latest` always points at the newest). A release carries `lingologos-dataset.zip` (data, chat pairs, corpus, configs, templates, tools), `grammar.json`, `grammar.yaml`, `DatasetGrammar.gf`, `grammar-metrics.json` and `dataset-stats.json`. The files are free to download. `.github/workflows/dataset.yml` produces them in four stages: consistency check, grammar induction, an optional CPU fine-tuning smoke test, and the release itself.
+Corpus and tools are versioned in this repository. The packaged files are published as GitHub Release assets under incrementing tags: the first release is `dataset-v1`, the next ones continue as `dataset-v2`, `dataset-v3` and so on (`https://github.com/tailot/LingoLOGOS/releases/latest` always points at the newest). A release carries `lingologos-dataset.zip` (data, chat pairs, corpus, configs, templates, tools), `grammar.json`, `grammar.yaml`, `DatasetGrammar.gf`, `grammar-metrics.json`, `tokenizer.json`, `tokenizer-metrics.json`, `masking-metrics.json` and `dataset-stats.json`. The files are free to download. `.github/workflows/dataset.yml` produces them in three stages: consistency check plus tokenizer and mask gates, grammar induction, and the release itself.
 
-The training entry points of that folder, all of them thin wrappers over the modules documented above:
+The learning and checking entry points of that folder, all thin wrappers over the modules documented above and all model-free:
 
 | entry point | role |
 | --- | --- |
 | `dataset/tools/validate_dataset.py` | re-derives every bracket word, pattern and SMT text, and builds all 2,698 logical forms in Z3 |
 | `dataset/tools/train_grammar.py` | induces the PCFG over the corpus of the dataset with `DifferentiableCYKParser`, `GrammarTrainer`, `PCFGrammar` and `GrammarVerifier` |
-| `dataset/tools/train_sft.py` | LoRA fine-tuning of a chat model on the phrase pairs, plain PyTorch loop, prompt tokens masked out of the loss |
-| `dataset/tools/evaluate_sft.py` | generates answers on held-out rows and scores exact match, identical bracket tree, identical formal payload, balanced brackets |
-| `dataset/tools/publish_to_hub.py` | assembles the adapter, tokenizer files, model card and query script, and uploads them to the model repository on the Hub |
-| `dataset/tools/ask_model.py` | queries the trained model and verifies its answer: bracket balance, operator arities, solver consistency |
+| `dataset/tools/train_tokenizer.py` | learns the byte-pair vocabulary of section 1.6 from the training split only, derives the protected alphabet from the operator registry, and runs gates `T1`-`T5` on all three splits |
+| `dataset/tools/verify_masking.py` | builds the automaton of section 1.7 from the registry plus the training split, and runs gates `M1`-`M5` against an independent oracle, including the negative controls and the token-level protocol check |
 
-The fine-tuning stage runs on a local machine with a GPU: GitHub-hosted runners have no GPU and a six hour job limit, so the pipeline only trains the grammar and a CPU smoke adapter. Model weights of third-party base models are never uploaded; only the adapter, its tokenizer files, the model card and the query script go to the Hub. Full commands and sizing for consumer cards are in `dataset/TRAINING.md` and in section 11 of `README.md`.
+There is no chat fine-tuning stage and no third-party model in this repository: the assistant that answers in natural language is the pure model described in `doc/PURE_MODEL_ROADMAP.md`, whose tokenizer and mask are already trained here, and whose network and training loop are the remaining phases of that roadmap. Sizing notes for consumer cards, the measured saturation of the vocabulary and the full flag documentation are in `dataset/TRAINING.md` and in section 11 of `README.md`.
 
 ---
 
@@ -359,10 +447,27 @@ To maintain high engineering and academic standards:
 5. **No bit-exact reproducibility.** No global `torch` seed or deterministic algorithm setting is enforced inside the library; only `synthesize.py` seeds `random`/`torch`, so artifacts are reproducible per machine/build, not across PyTorch releases.
 
 ### 4.5 Coverage of the Test Suite
-`tests/` (43 tests) locks, in particular: the distribution invariant for the parser and for the
+`tests/` (99 tests) locks, in particular: the distribution invariant for the parser and for the
 extracted grammar; inside vs Viterbi agreement; post-pruning renormalization against
 `probability_pre_pruning`; disjoint train/test split; the corrected semantics of
 `check_word_balance_z3` (regression: `())`, `)(`, `][`, `((`, `[(]`, `(()[]` must be `INVALID`);
 refutation of an over-generating grammar with the witness `(]`; the `gold_rule_f1` alignment on an
 isomorphic copy of the gold CNF with renamed non-terminals; and the negative-control generator
 (every control must be outside Dyck-2).
+
+The pure-model track adds two suites. `tests/test_tokenizer.py` (16 tests) locks determinism of the
+learned vocabulary, losslessness of the pre-tokenization, the no-merge rule on protected atoms, a
+byte-exact round trip, zero unknown tokens including invisible whitespace and digit runs, one token
+per algebra symbol, rejection of a symbol that only looks atomic (`SCHEDULEX`, `review`), the two
+stop conditions of the merge loop, `encodable_symbols`, and `save` / `load` identity plus refusal of
+a foreign format id. `tests/test_masking.py` (40 tests) locks the reader/writer inverse property,
+refusal of fourteen malformed trees (missing and extra child, crossed brackets, leaf where an
+operator name belongs, leaf shape too short or too long, unknown operator or leaf tag, payload
+without a leaf, truncated stream, second root, nested leaf), the fact that the operator name alone
+fixes every later closing bracket, the round-node-only root, the leaf shape profile, progress on
+every proper prefix of a legal stream, seed reproducible sampling whose 200 draws are all legal
+Dyck-2 trees, that the learned child-kind refinement strictly narrows the mask, and at token level
+the gold protocol step by step, the closing marker available only at completeness, the forced single
+space separator, `-inf` on every inadmissible logit with admissible scores untouched and zero
+probability mass outside the allowed set, and hard errors on a narrower logits vector or a missing
+alphabet symbol.

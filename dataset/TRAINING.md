@@ -1,28 +1,25 @@
 # Training guide
 
-Two independent training runs are available. Both read only this folder and write
-only inside `dataset/checkpoints/`; nothing in the LingoLOGOS source tree is modified.
+Three independent runs are available in this folder. All of them read only this folder and
+write only inside `dataset/checkpoints/`; nothing in the LingoLOGOS source tree is modified,
+and **nothing here downloads a model, a vocabulary or a weight file from anywhere**. The
+assistant this corpus is meant to train is built from scratch; the parts that exist, the parts
+that are still missing and the measurements behind both are in `doc/PURE_MODEL_ROADMAP.md` at
+the repository root.
 
 ## 0. Environment
 
-The machine already has the packages needed for the grammar run (torch, z3-solver, lark).
-The language-model run needs a matching set of Hugging Face libraries. The environment
-currently has `huggingface-hub 1.33` together with `transformers 4.52.4`, and that
-combination refuses to start (`huggingface-hub>=0.30.0,<1.0 is required`). Keep the
-project environment untouched and use a dedicated virtual environment:
+The packages already installed for the engine are enough for everything in this folder:
+`torch`, `z3-solver`, `lark`, `pyyaml`, `numpy`, `pytest`. The tokenizer and the mask are pure
+Python plus torch, so there is no extra dependency to install and no second virtual
+environment to maintain.
 
 ```powershell
-python -m venv --system-site-packages .venv-train
-.\.venv-train\Scripts\Activate.ps1
-pip install "transformers>=4.52,<5" "huggingface-hub>=0.30,<1.0" peft accelerate
-python -c "import torch, transformers, peft; print(torch.__version__, torch.cuda.is_available(), transformers.__version__)"
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 ```
 
-The `--system-site-packages` flag reuses the CUDA build of torch that is already
-installed, so nothing big is downloaded again; the pinned `huggingface-hub` inside the
-virtual environment simply shadows the incompatible global copy. The last line prints
-three values and must show `True` for the CUDA flag. The grammar script also works in
-that environment, so one environment is enough.
+The second value should be `True` if you want the neural runs to use the GPU. Grammar
+induction, tokenizer learning and mask verification also work on the CPU.
 
 ## 1. Consistency check (always run this first)
 
@@ -66,63 +63,98 @@ Expected acceptance gates, all four true:
 The run finishes with `FINAL VERDICT: PASS`. `--lenient` keeps exit code 0 on failures,
 `--list-only` prints the metrics without writing files.
 
-## 3. Fine-tuning a chat model on the phrase pairs
+One honest caveat, measured and repeated here because it is easy to miss: the default
+`--init prior` seeds the grammar with the gold Dyck-2 structure (`reference.apply_gold_prior`).
+With `--init random` the induction is not solved at this budget: gold rule `F1` is about 0.42
+and the extracted grammar over-generates `(]`, which gate G4 then refuses.
+
+## 3. Phase 1: learning the vocabulary of the pure model
 
 ```powershell
-python dataset/tools/train_sft.py --model Qwen/Qwen2.5-7B-Instruct --epochs 2 --batch-size 2 --grad-accum 8 --lr 2e-4 --max-seq-length 512 --grad-checkpointing
+python dataset/tools/train_tokenizer.py --vocab-size 6000
 ```
 
-The script trains a LoRA adapter (r 16, alpha 32) with a plain PyTorch loop: prompt
-tokens are masked out of the loss, only the assistant answer is learned. It reads
-`sft/train.jsonl` (24,280 rows) and evaluates on `sft/valid.jsonl` (1,350 rows).
-Adapter, tokenizer and `training_config.json` land in `dataset/checkpoints/sft/`.
+The script learns a byte-pair vocabulary from the `train` split of `sft/` only and measures
+itself on `train`, `valid` and `test`. It uses no pretrained tokenizer and no external
+corpus: the protected alphabet (the four brackets, the 53 operator names, the leaf tags) is
+derived from `templates/operators.json`, and merges are learned only inside ordinary words,
+never across a formal symbol. Artifacts: `dataset/checkpoints/tokenizer/tokenizer.json` and
+`metrics.json`.
 
-Quick smoke test before a long run:
+Measured on the shipped corpus:
+
+| quantity | value |
+| --- | --- |
+| training texts / pre-tokenized units | 72,840 / 5,214,389 |
+| word types | 1,578 |
+| atomic units / atomic types | 3,040,076 / 268 |
+| learned merges | 3,578, stop reason `no mergeable pair left` |
+| vocabulary size | 3,921 (`saturated_at: 3921`) |
+| round trip failures | 0 on every split |
+| unknown tokens | 0 over 5,786,067 produced tokens |
+| formal symbols encoded as one token | 267 of 267 |
+| bracket words re-encoded exactly | 13,490 checked, 0 broken |
+
+Gates:
+
+| Gate | Meaning |
+| --- | --- |
+| T1 | pre-tokenization is reversible, the text is rebuilt from its pieces |
+| T2 | no unknown token on any split |
+| T3 | every formal symbol of the algebra is a single atomic token |
+| T4 | the formal symbols of the held-out splits are already in the vocabulary |
+| T5 | every bracket word survives encode plus decode unchanged |
+
+The vocabulary **saturates**: with 1,578 word types and 3,040,076 atomic units there is simply
+nothing left to merge past 3,921 entries, so a target of 8,000 to 32,000 pieces is not
+reachable on this corpus and `V = 3,921` is the number to size the embedding on. Use
+`--limit` for a fast probe, `--all-splits` to train on all three (only for experiments, it
+destroys the held-out property) and `--lenient` to keep exit code 0 when a gate fails.
+
+## 4. Phase 2: verifying the symbolic decoding mask
 
 ```powershell
-python dataset/tools/train_sft.py --check-data                      # data only, no download
-python dataset/tools/train_sft.py --model HuggingFaceTB/SmolLM2-135M-Instruct --limit 200 --epochs 1 --max-seq-length 512
+python dataset/tools/verify_masking.py --samples 300 --refine
 ```
 
-Useful knobs: `--limit`, `--epochs`, `--batch-size`, `--grad-accum`, `--lr`,
-`--max-seq-length`, `--lora-r`, `--save-every`, `--cpu`.
+The mask is a stack automaton over the *symbol* alphabet, built from the arities in
+`templates/operators.json` and the leaf shapes observed in the training split; it admits
+exactly the legal bracket algebra and nothing else, so an illegal answer is not scored
+badly, it is unreachable. The tool checks it against an independent oracle that reuses
+`logic_map.is_well_bracketed`, the registry arities and an independent reader, never the
+mask itself. Artifact: `dataset/checkpoints/masking/masking_metrics.json`.
 
-Sizing for a 16 GB card: the seven billion parameter model in bfloat16 needs about
-15 GB of memory on its own, so it only fits with `--batch-size 1 --grad-accum 16
---max-seq-length 384 --grad-checkpointing`, and it still leaves little headroom. A
-three billion parameter model runs comfortably at `--batch-size 2 --max-seq-length 512`.
-Start with a timed probe to measure the speed of your machine before committing to a
-long run, and read the reported steps per second: the full split has 24,280 rows, so a
-probe over 1,000 rows takes about twenty four times less time than one epoch.
+Measured:
 
-## 3.1 Scoring the trained model
+| Gate | Measured |
+| --- | --- |
+| M1 | 1,350 of 1,350 held-out algebra streams accepted |
+| M2 | 16,350 of 16,350 mutated streams refused (crossed bracket, deleted bracket, inserted bracket, truncation, unknown operator, wrong arity, oversized leaf) |
+| M3 | 300 of 300 constrained samples are legal trees and well-bracketed words |
+| M4 | 52 observed operator and arity pairs agree with the registry, 0 serialization mismatch |
+| M5 | 67,190 of 67,190 gold token decisions accepted; closing marker forced at completeness 1,350 times, offered out of place 0 times |
 
-Training alone does not tell you whether the model learned the meanings. This script
-generates an answer for rows of a split and scores four things: exact text match,
-normalized match, identical bracket word, and identical formal payload.
+Alphabet of the mask: 53 operators, 136 leaf tags, 75 payload tokens, leaf length profile
+`{1: 135, 2: 1}`, 268 vocabulary tokens for the masked alphabet. With `--refine` the extra
+restriction "which child kind sits at which position" is learned from the training split only
+(83 refined pairs) and the held-out split is still accepted 1,350 of 1,350.
 
-```powershell
-python dataset/tools/evaluate_sft.py --self-check                                  # sanity check, no model
-python dataset/tools/evaluate_sft.py --model Qwen/Qwen2.5-3B-Instruct --adapter dataset/checkpoints/sft --limit 200
-```
+Two honest caveats recorded in the metrics file: the `unknown_leaf` controls were all
+discarded because every held-out leaf symbol is already inside the training alphabet, and one
+of the 53 registered operators never occurs in the corpus, so its arity is never exercised.
+`--samples`, `--max-depth`, `--max-symbols`, `--seed`, `--list-only` and `--lenient` control
+the run.
 
-`--self-check` scores the gold answers against themselves and must report 100 on every
-line; it proves the scoring code is right without loading anything. In a real run the
-number to watch is `structure`: it says how often the model produced the exact bracket
-word for the sentence. `well formed` says how often the brackets were balanced at all,
-which separates a model that has learned the shape from one that has memorized the
-words. The full per row scores go to `dataset/checkpoints/eval/results_generated.json`,
-which stays out of git. Use `--limit 0` to score all 1,350 test rows.
+## 5. Phases 3 to 5: not implemented yet
 
-To publish the result, compress the adapter folder and attach it to the release:
+The network (6 encoder plus 6 decoder layers, 8 heads, `d_model` 512, `d_ff` 2048, dropout
+0.1, stochastic initialization, no pretrained weights), the training loop with masked
+cross-entropy, and the Z3 benchmark of generated answers are still to be written. Design,
+hyperparameters and the phase plan are in `doc/PURE_MODEL_ROADMAP.md`, together with the
+corrections to the original specification (vocabulary saturation, warmup length, scheduler,
+and the redundancy of the soft symbolic penalty once the hard mask is in place).
 
-```powershell
-New-Item -ItemType Directory -Force dist | Out-Null
-Compress-Archive -Path dataset\checkpoints\sft\* -DestinationPath dist\chat-adapter.zip
-gh release upload dataset-v1 dist\chat-adapter.zip --clobber
-```
-
-## 4. Regenerating or extending the dataset
+## 6. Regenerating or extending the dataset
 
 The items are produced from the 50 templates and the multilingual lexicon:
 
@@ -134,8 +166,10 @@ python dataset/tools/validate_dataset.py
 Adding a sentence pattern means adding one entry to the relevant file in
 `dataset/templates/`; the validator then checks that the new patterns are covered by
 the lexicon, that the bracket words stay balanced and that the SMT translation builds.
+After a regeneration, rerun the tokenizer and the mask gates: both learn their alphabet
+and their leaf shapes from the corpus, so a new domain has to relearn them.
 
-## 5. The pipeline in GitHub Actions
+## 7. The pipeline in GitHub Actions
 
 The folder has its own pipeline, `.github/workflows/dataset.yml`, kept separate
 from the CI of the engine. It runs on every push that touches `dataset/**` and it
@@ -143,67 +177,26 @@ can be started by hand from the Actions tab with the "Run workflow" button.
 
 Stages:
 
-1. `consistency`: the validator, then the check of the fine-tuning pairs.
+1. `consistency`: the validator, then the tokenizer gates `T1` to `T5`, then the mask
+   gates `M1` to `M5`; the vocabulary and both metric files are uploaded as artifacts.
 2. `grammar`: induction on the bracket algebra, 90 epochs, artifacts uploaded.
-3. `fine-tuning-smoke`: optional checkbox, a tiny adapter trained on CPU.
-4. `release`: the corpus and the induced grammar are packaged and published in a
-   GitHub Release of this repository.
+3. `release`: the corpus, the induced grammar and the learned vocabulary are packaged and
+   published in a GitHub Release of this repository.
 
 To publish the file at the end, either start the workflow with the release option
 checked, which creates the tag `dataset-v<run number>` by itself, or push a tag:
 
 ```powershell
-git tag dataset-v1
-git push origin dataset-v1
+git tag dataset-v2
+git push origin dataset-v2
 ```
 
 The release contains `lingologos-dataset.zip` (items, chat pairs, corpus,
 templates, configurations, tools and the two documents), `grammar.json`,
 `grammar.yaml`, `DatasetGrammar.gf` and `grammar-metrics.json` (the grammar the
-pipeline induced, with gates G1 to G4), plus `dataset-stats.json`.
+pipeline induced, with gates G1 to G4), `tokenizer.json` and `tokenizer-metrics.json`
+(the vocabulary learned from the corpus, with gates T1 to T5), `masking-metrics.json`
+(the symbolic decoding gates M1 to M5) and `dataset-stats.json`.
 
-A full chat fine-tuning is deliberately not part of the pipeline: it needs a GPU
-and several gigabytes of download, so it remains a local run. The pipeline itself
-publishes nothing to an external hub, and `dataset/checkpoints/` stays out of git.
-Publishing the adapter to the model repository is a separate local step, described next.
-
-## 6. Downloading a release, publishing the adapter, querying the model
-
-Anyone can take the corpus from a release of this repository. The first release is
-tagged `dataset-v1` and every later publication increments the tag (`dataset-v2`,
-`dataset-v3`, ...); `https://github.com/tailot/LingoLOGOS/releases/latest` is always the
-newest one.
-
-```powershell
-gh release download dataset-v1                        # every asset of that release
-gh release download dataset-v1 -r lingologos-dataset.zip
-```
-
-After a local training run, assemble and publish the files that make the adapter usable
-on `https://huggingface.co/tailot/LingoLOGOS`:
-
-```powershell
-python dataset/tools/publish_to_hub.py                 # preview: lists the staged files
-python dataset/tools/publish_to_hub.py --apply         # needs a write token in HF_TOKEN
-```
-
-The staging folder is `dataset/checkpoints/hf_repo/`, which is outside git. It holds the
-adapter and tokenizer files, the model card rendered from `dataset/hf_publish/MODEL_CARD.md`
-with the measured scores, `evaluation.json` and `ask_model.py`. Files that look like base
-model weights are refused by name or by size, so a third-party model is never uploaded by
-accident. The upload happens only with `--apply`, never on a preview.
-
-To use the trained model:
-
-```powershell
-python dataset/tools/ask_model.py --model Qwen/Qwen2.5-3B-Instruct --adapter dataset/checkpoints/sft --lang it --ask "Accendi la lampada della cucina solo se il livello di CO2 supera 50 percento"
-python dataset/tools/ask_model.py --model Qwen/Qwen2.5-3B-Instruct --adapter dataset/checkpoints/sft --lang de          # interactive loop
-python dataset/tools/ask_model.py --model Qwen/Qwen2.5-3B-Instruct --adapter dataset/checkpoints/sft --verbalize "( IF [ flag 1 ] [ dim_light ] )" --lang it
-```
-
-The script builds the prompt exactly as the training data did, reading the system message
-from the `sft/` files, then checks the answer: brackets balanced, every operator known
-with the right number of arguments against `templates/operators.json`, and whether the
-solver finds the conditions consistent. It can also go the other way, from a bracket tree
-to a sentence. Use `--cpu` to force the CPU and `--no-solver` to skip the Z3 step.
-
+Everything the pipeline runs fits on a CPU runner. `dataset/checkpoints/` stays out of
+git, and no stage of the pipeline contacts an external hub or downloads a model.
