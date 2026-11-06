@@ -52,6 +52,7 @@ identical logical form. 2,698 distinct meanings, 26,980 language views of them,
 python dataset/tools/validate_dataset.py      # re-checks every consistency rule
 python dataset/tools/train_grammar.py         # induces the grammar of the algebra
 python dataset/tools/train_sft.py             # fine-tunes a chat model on the pairs
+python dataset/tools/evaluate_sft.py          # scores a trained model on held-out rows
 ```
 
 Details, hyperparameters and the environment to use: see [TRAINING.md](TRAINING.md).

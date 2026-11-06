@@ -12,13 +12,17 @@ combination refuses to start (`huggingface-hub>=0.30.0,<1.0 is required`). Keep 
 project environment untouched and use a dedicated virtual environment:
 
 ```powershell
-python -m venv .venv-train
+python -m venv --system-site-packages .venv-train
 .\.venv-train\Scripts\Activate.ps1
 pip install "transformers>=4.52,<5" "huggingface-hub>=0.30,<1.0" peft accelerate
-pip install torch --index-url https://download.pytorch.org/whl/cu128   # only if torch is missing
+python -c "import torch, transformers, peft; print(torch.__version__, torch.cuda.is_available(), transformers.__version__)"
 ```
 
-The grammar script also works in that environment, so one environment is enough.
+The `--system-site-packages` flag reuses the CUDA build of torch that is already
+installed, so nothing big is downloaded again; the pinned `huggingface-hub` inside the
+virtual environment simply shadows the incompatible global copy. The last line prints
+three values and must show `True` for the CUDA flag. The grammar script also works in
+that environment, so one environment is enough.
 
 ## 1. Consistency check (always run this first)
 
@@ -82,6 +86,40 @@ python dataset/tools/train_sft.py --model HuggingFaceTB/SmolLM2-135M-Instruct --
 
 Useful knobs: `--limit`, `--epochs`, `--batch-size`, `--grad-accum`, `--lr`,
 `--max-seq-length`, `--lora-r`, `--save-every`, `--cpu`.
+
+Sizing for a 16 GB card: the seven billion parameter model in bfloat16 needs about
+15 GB of memory on its own, so it only fits with `--batch-size 1 --grad-accum 16
+--max-seq-length 384 --grad-checkpointing`, and it still leaves little headroom. A
+three billion parameter model runs comfortably at `--batch-size 2 --max-seq-length 512`.
+Start with a timed probe to measure the speed of your machine before committing to a
+long run, and read the reported steps per second: the full split has 24,280 rows, so a
+probe over 1,000 rows takes about twenty four times less time than one epoch.
+
+## 3.1 Scoring the trained model
+
+Training alone does not tell you whether the model learned the meanings. This script
+generates an answer for rows of a split and scores four things: exact text match,
+normalized match, identical bracket word, and identical formal payload.
+
+```powershell
+python dataset/tools/evaluate_sft.py --self-check                                  # sanity check, no model
+python dataset/tools/evaluate_sft.py --model Qwen/Qwen2.5-3B-Instruct --adapter dataset/checkpoints/sft --limit 200
+```
+
+`--self-check` scores the gold answers against themselves and must report 100 on every
+line; it proves the scoring code is right without loading anything. In a real run the
+number to watch is `structure`: it says how often the model produced the exact bracket
+word for the sentence. `well formed` says how often the brackets were balanced at all,
+which separates a model that has learned the shape from one that has memorized the
+words. The full per row scores go to `dataset/checkpoints/eval/results_generated.json`,
+which stays out of git. Use `--limit 0` to score all 1,350 test rows.
+
+To publish the result, compress the adapter folder and attach it to the release:
+
+```powershell
+Compress-Archive -Path dataset\checkpoints\sft\* -DestinationPath chat-adapter.zip
+gh release upload dataset-v1 chat-adapter.zip --clobber
+```
 
 ## 4. Regenerating or extending the dataset
 
