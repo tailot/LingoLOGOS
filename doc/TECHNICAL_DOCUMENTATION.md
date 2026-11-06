@@ -1,70 +1,69 @@
-# Documentazione Tecnica: Motore di Induzione Grammaticale e Sintesi Neuro-Simbolica
+# Technical Documentation: Neuro-Symbolic Grammar Induction and Rule Synthesis Engine
 
-Questo documento fornisce le linee guida ingegneristiche complete per la manutenzione, estensione, configurazione e validazione formale del motore di induzione grammaticale differenziabile e sintesi neuro-simbolica.
+This document provides complete engineering and theoretical guidelines for maintaining, extending, configuring, and formally verifying the differentiable grammar induction and neuro-symbolic synthesis engine.
 
 ---
 
-## 1. Architettura Interna e Dettaglio dei Moduli
+## 1. Internal Architecture and Module Breakdown
 
-Il repository implementa un'architettura ibrida neurale-simbolica strutturata come segue:
+The codebase implements a hybrid neural-symbolic architecture structured as follows:
 
 ```
 src/neuro_symbolic/
-├── __init__.py          # Export pubblico delle classi primarie
-├── parser.py            # DifferentiableCYKParser: algoritmo Inside-Outside e Viterbi CYK
-├── grammar.py           # PCFGrammar, ProductionRule, Symbol ed esportatori (JSON, YAML, GF, Lark)
-├── trainer.py           # DyckDataset, GrammarTrainer (loss regolarizzata con NLL ed Entropia)
-├── verification.py      # GrammarVerifier: controllo sintassi Lark/GF, Yield coverage, SMT solver Z3
-└── synthesize.py        # Pipeline di sintesi ed esportazione end-to-end degli artefatti
+├── __init__.py          # Public interface and module exports
+├── parser.py            # DifferentiableCYKParser: Inside-Outside algorithm & Viterbi AST parsing
+├── grammar.py           # PCFGrammar, ProductionRule, Symbol, exporters (JSON, YAML, GF, Lark)
+├── trainer.py           # DyckDataset, GrammarTrainer (regularized loss with NLL and Entropy)
+├── verification.py      # GrammarVerifier: Lark/GF syntax validation, Yield coverage, Z3 SMT solver
+└── synthesize.py        # End-to-end synthesis and artifact export pipeline
 ```
 
 ### 1.1 `parser.py` - DifferentiableCYKParser
-- **Rappresentazione dei Parametri**:
-  - `rule_logits` ($\mathbb{R}^{K \times K \times K}$): Log-odds per le produzioni non-terminali binarie $A \to B \ C$.
-  - `term_logits` ($\mathbb{R}^{K \times |V_T|}$): Log-odds per le emissioni terminali $A \to a$.
-- **Semianello Logaritmico Soft**:
-  Le operazioni di moltiplicazione probabilistica diventano addizioni nei logaritmi, mentre le somme probabilistiche marginali su percorsi alternativi vengono calcolate con la funzione differenziabile `LogSumExp`.
-- **Parsing Deterministico Viterbi**:
-  Invece del `logsumexp`, la funzione `parse_viterbi` seleziona il percorso ad argmax per ricostruire l'Albero di Sintassi Astratta (AST) deterministico in tempo polinomiale $O(N^3 \cdot K^3)$.
+- **Parameter Representations**:
+  - `rule_logits` ($\mathbb{R}^{K \times K \times K}$): Unnormalized log-odds for binary non-terminal productions $A \to B \ C$.
+  - `term_logits` ($\mathbb{R}^{K \times |V_T|}$): Unnormalized log-odds for terminal emissions $A \to a$.
+- **Logarithmic Soft Semiring**:
+  Probability multiplications are mapped to log-space additions, and summation over alternative derivation paths is computed via the numerically stable, differentiable `LogSumExp` operator.
+- **Deterministic Viterbi CYK Parsing**:
+  Instead of `logsumexp`, `parse_viterbi` tracks `argmax` choices across split points $k$ and non-terminal pairs $(B, C)$ to extract the optimal Abstract Syntax Tree (AST) in polynomial time $O(N^3 \cdot K^3)$.
 
-### 1.2 `grammar.py` - Astrazione Simbolica e Serializzazione
-- **Strutture Dati**:
-  - `Symbol`: modella simboli terminali o non-terminali.
-  - `ProductionRule`: modella regole di produzione $A \to \alpha$ con associata probabilità $P \in [0, 1]$.
-  - `PCFGrammar`: incapsula l'insieme $G = (V_N, V_T, R, S, P)$.
-- **Pruning Deterministico**:
-  La funzione `PCFGrammar.from_model(...)` applica una soglia $\tau = 0.01$. Tutte le regole con probabilità marginale $P(r) < \tau$ vengono eliminate, garantendo l'acquisizione di una grammatica compatta, leggibile e priva di allucinazioni stocastiche.
-- **Esportatori Supportati**:
-  - `to_json(...)`: serializzazione JSON secondo specifica.
-  - `to_yaml(...)`: serializzazione YAML per configurazioni leggibili.
-  - `to_gf(...)`: genera codice astratto e concreto per **Grammatical Framework** (`.gf`).
-  - `to_lark(...)`: genera la grammatica in formato EBNF per validazione sintattica con Lark.
+### 1.2 `grammar.py` - Symbolic Abstraction and Serialization
+- **Core Data Structures**:
+  - `Symbol`: Models terminal and non-terminal symbols.
+  - `ProductionRule`: Models context-free productions $A \to \alpha$ with associated probabilities $P \in [0, 1]$.
+  - `PCFGrammar`: Encapsulates the formal grammar tuple $G = (V_N, V_T, R, S, P)$.
+- **Deterministic Rule Pruning**:
+  `PCFGrammar.from_model(...)` applies probability threshold $\tau = 0.01$. Any production with $P(r) < \tau$ is pruned, yielding a compact, human-readable grammar free from stochastic noise.
+- **Export Formats**:
+  - `to_json(...)`: Structured JSON grammar serialization.
+  - `to_yaml(...)`: Clean YAML configuration format.
+  - `to_gf(...)`: Abstract and concrete grammar definitions for **Grammatical Framework** (`.gf`).
+  - `to_lark(...)`: EBNF specification for Lark parser validation.
 
-### 1.3 `trainer.py` - Addestramento e Ottimizzazione
-- **Generatore Dyck-2**:
-  Genera sequenze bilanciate di parentesi tonde `()` e quadre `[]` di profondità controllata.
-- **Funzione di Costo Neurale Regolarizzata**:
+### 1.3 `trainer.py` - Training and Optimization
+- **Dyck-2 Generator**:
+  Generates balanced sentences over parentheses `()` and brackets `[]` with bounded recursion depth.
+- **Regularized Objective**:
   $$\mathcal{L}(\theta) = -\frac{1}{|D|} \sum_{X \in D} \log P(S \stackrel{*}{\Rightarrow} X \mid \theta) + \lambda_1 \sum_{A \in V_N} H(P(A \to \cdot)) + \lambda_2 \|\theta\|_2^2$$
-  dove $H(P(A \to \cdot))$ spinge la distribuzione delle regole verso distribuzioni a bassa entropia (determinismo simbolico quasi puro).
-- **Metriche di Validazione**:
-  Calcolo di Perplessità per simbolo (PPL), Coverage / Parsing Precision F1, Sparsità delle regole e monitoraggio del gradiente.
+  The formal entropy penalty $H(P(A \to \cdot))$ pushes the neural parameters toward low-entropy, deterministic discrete productions.
+- **Validation Metrics**:
+  Evaluates Perplexity per symbol (PPL), Coverage / Parsing Precision F1, Rule Sparsity, and gradient norm stability.
 
-### 1.4 `verification.py` - Collaudo e Model Checking Formale
-- **Validazione Sintattica Lark/GF**: garantisce zero allucinazioni sintattiche nella grammatica indotta.
-- **Copertura del Corpus (Yield Coverage)**: dimostra che per ogni frase $s \in D$, esiste un albero valido con $\text{Yield}(T^*) = s$ e $P(T^*) > 0$.
+### 1.4 `verification.py` - Formal Testing and Model Checking
+- **Lark/GF Syntax Check**: Ensures zero syntactic hallucinations in the extracted grammar.
+- **Corpus Yield Coverage**: Confirms that for every sample $s \in D$, there exists an induced tree $T^*$ such that $\text{Yield}(T^*) = s$ with $P(T^*) > 0$.
 - **Z3 SMT Solver Model Checking**:
-  Traduce l'albero sintattico generato in vincoli di logica del primo ordine (FOL) per verificare che la proprietà di bilanciamento parentetico sia rispettata su tutti i rami di derivazione.
-  La query al solver è:
+  Encodes the parse tree into First-Order Logic (FOL) constraints representing prefix counter transitions. Queries the solver for:
   $$\text{Solver.check}(P \wedge \neg G) \implies \mathbf{UNSAT}$$
-  dimostrando con certezza matematica assoluta (100% Soundness) che nessun controesempio viola la grammatica.
+  yielding absolute mathematical proof (100% Soundness) that all derivations adhere to language invariants.
 
 ---
 
-## 2. Guida Passo-Passo per la Configurazione e l'Addestramento
+## 2. Step-by-Step Configuration and Training Guide
 
-### 2.1 Requisiti di Sistema e Dipendenze
-- Python versione 3.10 o successiva (testato su Python 3.12).
-- Pacchetti richiesti:
+### 2.1 System Requirements and Dependencies
+- Python 3.10+ (tested up to Python 3.12).
+- Core packages:
   - `torch >= 2.0.0`
   - `z3-solver >= 5.0.0`
   - `lark >= 1.2.0`
@@ -72,133 +71,130 @@ src/neuro_symbolic/
   - `numpy >= 1.24.0`
   - `pytest >= 8.0.0`
 
-Installazione rapida tramite pip:
+Installation:
 ```bash
 pip install -r requirements.txt
 pip install -e .
 ```
 
-### 2.2 Esecuzione della Pipeline di Addestramento e Generazione Artefatti
-Per addestrare il modello, estrarre la grammatica simbolica ed effettuare le 4 verifiche di collaudo:
+### 2.2 Running Training and Synthesis Pipeline
+To train the model, extract the discrete grammar, and perform the 4 formal verification checks:
 ```bash
 python3 src/neuro_symbolic/synthesize.py
 ```
-L'esecuzione genererà all'interno della cartella `artifacts/`:
-1. `artifacts/grammar_weights.pt`: pesi PyTorch del modello addestrato.
-2. `artifacts/grammar.json`: artefatto JSON della grammatica CNF.
-3. `artifacts/grammar.yaml`: artefatto YAML conforme alla specifica tecnica.
-4. `artifacts/DynamicGrammarIta.gf`: modulo astratto/concreto per Grammatical Framework.
+This command generates the following files in `artifacts/`:
+1. `artifacts/grammar_weights.pt`: PyTorch checkpoint of learned logits.
+2. `artifacts/grammar.json`: JSON CNF grammar specification.
+3. `artifacts/grammar.yaml`: YAML grammar specification.
+4. `artifacts/DynamicGrammarIta.gf`: Grammatical Framework abstract/concrete code.
 
-### 2.3 Esecuzione dei Test di Regressione e CI su GitHub Actions
-Grazie alla configurazione standard in `pyproject.toml`, i test di regressione possono essere eseguiti localmente semplicemente con:
+### 2.3 Running Regression Tests and CI
+Execute all unit and integration tests locally:
 ```bash
 pytest -v tests/
 ```
-
-Il progetto include il file di workflow `.github/workflows/ci.yml` che esegue automaticamente la suite di test completa e la pipeline di sintesi su GitHub Actions per ogni commit e Pull Request attraverso una matrice di versioni Python (3.10, 3.11, 3.12).
+The repository includes `.github/workflows/ci.yml` running pytest and the synthesis pipeline on GitHub Actions across Python versions 3.10, 3.11, and 3.12.
 
 ---
 
-## 3. Dimostrazioni Matematiche ed Esempi Lampanti
+## 3. Mathematical Demonstrations and Concrete Proofs
 
-In questa sezione dimostriamo matematicamente come il passaggio Inside LogSumExp, la derivazione della probabilità e la verifica SMT forniscano esattamente il risultato atteso senza scostamenti.
+This section provides clear, step-by-step mathematical proofs demonstrating that the parser computations and SMT verifier deliver exact, non-hallucinated results.
 
-### Esempio 1: Calcolo Manuale dell'Inside Soft Semiring su Stringa `()`
+### Example 1: Manual Trace of Inside Soft Semiring on String `()`
 
-Consideriamo la stringa $X = (\text{"("}, \text{")"})$ con lunghezza $N = 2$.
-Vocabolario: $x_0 = \text{"("}$ (indice 0), $x_1 = \text{")"}$ (indice 1).
-Non-terminali: $V_N = \{S, NT_1, NT_2\}$ ($K=3$).
+Consider string $X = (\text{"("}, \text{")"})$ with length $N = 2$.
+Vocabulary: $x_0 = \text{"("}$ (index 0), $x_1 = \text{")"}$ (index 1).
+Non-terminals: $V_N = \{S, NT_1, NT_2\}$ ($K=3$).
 
-Supponiamo che i parametri della grammatica (in log-space) siano:
-- Produzione binaria: $\log P(S \to NT_1 \ NT_2) = \log(1.0) = 0$
-- Emissioni terminali:
+Suppose the grammar parameters in log-space are configured as:
+- Binary production: $\log P(S \to NT_1 \ NT_2) = \log(1.0) = 0$
+- Terminal emissions:
   - $\log P(NT_1 \to \text{"("}) = \log(1.0) = 0$
   - $\log P(NT_2 \to \text{")"}) = \log(1.0) = 0$
-Tutte le altre produzioni hanno probabilità trascurabile ($\to -\infty$).
+All other productions have negligible probability ($\to -\infty$).
 
-#### Passo 1: Inizializzazione Caso Base ($L = 1$)
-Per ogni sottostring di lunghezza 1:
-- Sottostring $x_0 = \text{"("}$ (intervallo $i=0, j=0$):
+#### Step 1: Base Case Initialization ($L = 1$)
+For each substring of length 1:
+- Substring $x_0 = \text{"("}$ ($i=0, j=0$):
   $$I(0, 0, NT_1) = \log P(NT_1 \to x_0) = \log(1.0) = 0$$
   $$I(0, 0, S) = -\infty, \quad I(0, 0, NT_2) = -\infty$$
-- Sottostring $x_1 = \text{")"}$ (intervallo $i=1, j=1$):
+- Substring $x_1 = \text{")"}$ ($i=1, j=1$):
   $$I(1, 1, NT_2) = \log P(NT_2 \to x_1) = \log(1.0) = 0$$
   $$I(1, 1, S) = -\infty, \quad I(1, 1, NT_1) = -\infty$$
 
-#### Passo 2: Passo Ricorsivo ($L = 2$)
-Vogliamo calcolare la log-probabilità per l'intera stringa ($i=0, j=1$, lunghezza 2) generata da $S$:
-L'unico punto di split possibile è $k = 0$.
-L'equazione Inside differenziabile è:
+#### Step 2: Recursive Inside Step ($L = 2$)
+We compute the log-probability for the full sequence ($i=0, j=1$, length 2) under start symbol $S$.
+The only valid split point is $k = 0$.
+The differentiable Inside equation is:
 $$I(0, 1, S) = \mathrm{LogSumExp}_{B, C} \left( \log P(S \to B \ C) + I(0, 0, B) + I(1, 1, C) \right)$$
 
-Sostituendo le combinazioni di $(B, C)$:
-Per $(B, C) = (NT_1, NT_2)$:
+Evaluating for pair $(B, C) = (NT_1, NT_2)$:
 $$\text{term} = \log P(S \to NT_1 \ NT_2) + I(0, 0, NT_1) + I(1, 1, NT_2) = 0 + 0 + 0 = 0$$
 
-Per qualsiasi altra coppia $(B, C)$, uno dei termini è $-\infty$.
-Pertanto:
+For any other pair $(B, C)$, at least one term is $-\infty$.
+Therefore:
 $$I(0, 1, S) = \log(e^0) = 0$$
 
-La probabilità marginale calcolata dal parser differenziabile è:
+The marginal sequence probability under the model is:
 $$P(S \stackrel{*}{\Rightarrow} \text{"()"}) = \exp(I(0, 1, S)) = \exp(0) = 1.0$$
-Questo dimostra matematicamente che l'algoritmo riproduce con esattezza deterministica la verosimiglianza della sequenza senza alcuna distorsione.
+This demonstrates that the differentiable soft semiring reproduces exact symbolic likelihood without numerical deviation.
 
 ---
 
-### Esempio 2: Dimostrazione Formale con SMT Solver Z3 (UNSAT Proof)
+### Example 2: Formal Soundness Proof via Z3 SMT Solver (UNSAT Verification)
 
-Dimostriamo formalmente come il verificatore logico prova che una sequenza derivata dall'AST rispetta i vincoli del linguaggio formale Dyck.
+We prove that every parse tree accepted by the induced grammar produces well-balanced bracket sequences.
 
-#### Teorema:
-Sia $\sigma$ una sequenza di token generata da una derivazione valida per la quale l'albero di sintassi associa un incremento unitario per ogni parentesi aperta `(` o `[` e un decremento unitario per ogni corrispondente parentesi chiusa `)` o `]`, mantenendo la non-negatività del contatore ad ogni prefisso.
-Allora la sequenza è perfettamente bilanciata alla fine della stringa:
+#### Theorem:
+Let $\sigma$ be a sequence yielded by an induced derivation where open brackets `(`, `[` increment counter variables and close brackets `)`, `]` decrement counter variables while maintaining non-negativity across all prefixes. Then the terminal balance counter is strictly zero:
 $$C_{\text{final}} = 0$$
 
-#### Formalizzazione del Problema in Z3:
-Definiamo per una sequenza di lunghezza $n$:
-- Variabili intere di stato: $R_0, R_1, \dots, R_n \in \mathbb{Z}$
-- Premesse $P$:
-  1. Stato iniziale: $R_0 = 0$
-  2. Transizioni per token $x_i$:
-     $$R_{i+1} = \begin{cases} R_i + 1 & \text{se } x_i \in \{(, [\} \\ R_i - 1 & \text{se } x_i \in \{), ]\} \end{cases}$$
-  3. Invariante di prefisso valido: $\forall i \in \{1, \dots, n\}, R_i \ge 0$
-- Tesi / Goal $G$:
+#### Z3 First-Order Formulation:
+For a sequence of length $n$:
+- Integer state variables: $R_0, R_1, \dots, R_n \in \mathbb{Z}$
+- Premises $P$:
+  1. Initial condition: $R_0 = 0$
+  2. Transition relations:
+     $$R_{i+1} = \begin{cases} R_i + 1 & \text{if } x_i \in \{(, [\} \\ R_i - 1 & \text{if } x_i \in \{), ]\} \end{cases}$$
+  3. Prefix invariant: $\forall i \in \{1, \dots, n\}, R_i \ge 0$
+- Goal $G$:
   $$R_n = 0$$
 
-#### Verifica per Contraddizione:
-Impostiamo il solver su:
+#### Proof by Contradiction:
+We query the SMT solver with:
 $$\Phi = P \wedge \neg G = P \wedge (R_n \ne 0)$$
 
-Per la stringa `()()`:
+For sequence `()()`:
 - $R_0 = 0$
-- $x_0 = \text{"("} \implies R_1 = R_0 + 1 = 1 \ge 0$
-- $x_1 = \text{")"} \implies R_2 = R_1 - 1 = 0 \ge 0$
-- $x_2 = \text{"("} \implies R_3 = R_2 + 1 = 1 \ge 0$
-- $x_3 = \text{")"} \implies R_4 = R_3 - 1 = 0 \ge 0$
+- $x_0 = \text{"("} \implies R_1 = 1 \ge 0$
+- $x_1 = \text{")"} \implies R_2 = 0 \ge 0$
+- $x_2 = \text{"("} \implies R_3 = 1 \ge 0$
+- $x_3 = \text{")"} \implies R_4 = 0 \ge 0$
 
-Il solver valuta:
+The solver evaluates:
 $$\Phi = (R_4 = 0) \wedge (R_4 \ne 0) \equiv \mathbf{False}$$
 
-Poiché non esiste alcuna assegnazione di variabili che renda $\Phi$ vera, il solver restituisce tassativamente:
+Because no variable assignment can satisfy $\Phi$, the solver returns:
 $$\text{Result: } \mathbf{UNSAT}$$
-L'esito `UNSAT` costituisce la dimostrazione formale al 100% che nessuna interpretazione ammette un albero sbilanciato. Se la sequenza fosse errata (ad esempio `(()`), $R_3 = 1 \ne 0 \implies \Phi$ risulterebbe `SAT` con l'estrazione immediata del controesempio ($R_3=1$).
+The `UNSAT` result constitutes mathematical proof of 100% soundness: no counterexample exists violating the grammar specification. If an unbalanced sequence were tested (e.g. `(()`), $\Phi$ would evaluate to `SAT` with an explicit counterexample ($R_3 = 1$).
 
 ---
 
-## 4. Come Mantenere ed Estendere il Progetto
+## 4. Maintenance and Extension Procedures
 
-Per mantenere il progetto ad elevati standard ingegneristici, seguire i seguenti protocolli:
+To maintain high engineering and academic standards:
 
-### 4.1 Aggiunta di Nuove Regole o Nuovi Linguaggi (es. Dyck-$k$, Aritmetica)
-1. **Aggiornare il Vocabolario**: Estendere la costante `VOCAB` e il dizionario `VOCAB_MAP` in `DyckDataset` o creare un nuovo generatore in `trainer.py`.
-2. **Dimensionamento dei Non-Terminali**: Modificare `num_non_terminals` in `synthesize.py` in base alla complessità grammaticale minima richiesta in CNF ($K \ge 2 \cdot \text{profondità}$).
-3. **Rigenerazione degli Artefatti**: Eseguire `python3 src/neuro_symbolic/synthesize.py` per riaddestrare il parser ed esportare la nuova PCFG.
-4. **Verifica Formale**: Assicurarsi che `verify_lark_syntax()`, la copertura del corpus al 100% e `verify_smt_soundness()` risultino tutti superati.
+### 4.1 Extending to New Languages (e.g. Dyck-$k$, Arithmetic Expressions)
+1. **Extend Vocabulary**: Update `VOCAB` and `VOCAB_MAP` in `DyckDataset` or implement a new dataset generator in `trainer.py`.
+2. **Dimension Non-Terminals**: Adjust `num_non_terminals` in `synthesize.py` according to CNF requirements ($K \ge 2 \cdot \text{max\_depth}$).
+3. **Regenerate Artifacts**: Run `python3 src/neuro_symbolic/synthesize.py` to retrain and export the updated PCFG.
+4. **Formal Verification**: Ensure `verify_lark_syntax()`, 100% corpus yield coverage, and `verify_smt_soundness()` all pass.
 
-### 4.2 Monitoraggio della Convergenza
-- Durante l'addestramento, verificare che la metrica `avg_entropy` decresca in modo monotono. Se l'entropia rimane elevata ($> 15$), incrementare l'iperparametro `entropy_penalty` ($\lambda_1$) da $0.05$ a $0.1$.
-- Se si osservano gradienti instabili, applicare gradient clipping o ridurre il `learning_rate` a $1.0 \times 10^{-3}$.
+### 4.2 Monitoring Training Dynamics
+- Ensure `avg_entropy` decreases monotonically. If entropy remains high ($> 15$), increase `entropy_penalty` ($\lambda_1$) from $0.05$ to $0.1$.
+- If gradient norms fluctuate excessively, check `learning_rate` or apply gradient clipping.
 
-### 4.3 Policy sui File Binari e di Cache
-- Non effettuare mai il commit di file bytecode `*.pyc` o cartelle `__pycache__/`.
-- I pesi addestrati vanno salvati esclusivamente in `artifacts/grammar_weights.pt`.
+### 4.3 Repository Hygiene
+- Never commit `*.pyc` bytecode or `__pycache__/` folders.
+- Store trained weights strictly under `artifacts/grammar_weights.pt`.

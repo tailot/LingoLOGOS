@@ -1,45 +1,45 @@
-# Istruzioni Obbligatorie per Agenti IA (AGENTS.md)
+# Mandatory Instructions for AI Agents (AGENTS.md)
 
-Questo file definisce le direttive tassative e i vincoli operativi per qualsiasi Agente IA o assistente automatico che operi su questo repository.
-
----
-
-## 1. Vincolo di Aggiornamento Obbligatorio della Documentazione
-
-Ad **ogni modifica strutturale, architetturale, algoritmica o di interfaccia**, l'Agente IA **DEVE**:
-1. Aggiornare tempestivamente `doc/TECHNICAL_DOCUMENTATION.md` riflettendo i cambiamenti apportati.
-2. Aggiornare `README.md` se la modifica impatta l'architettura, la matrice degli iperparametri, le metriche, le procedure di collaudo o le istruzioni di esecuzione.
-3. Documentare le modifiche matematiche o le nuove equazioni/invarianti introdotte.
-
-> **Regola Aurea**: Nessuna Pull Request o Commit che alteri codice sorgente in `src/` o artefatti in `artifacts/` può essere considerata completa senza il corrispondente aggiornamento della documentazione tecnica in `doc/`.
+This file defines mandatory directives and operational constraints for any AI agent or automated assistant operating in this repository.
 
 ---
 
-## 2. Standard di Igiene del Repository
-- **Zero file binari di cache**: Non aggiungere o committare mai file `*.pyc` o cartelle `__pycache__/`.
-- Tutte le nuove dipendenze devono essere documentate in `README.md` e in `doc/TECHNICAL_DOCUMENTATION.md`.
-- Mantenere e rispettare sempre `.gitignore`.
+## 1. Mandatory Documentation Maintenance Rule
+
+Upon **any structural, architectural, algorithmic, or interface change**, the AI agent **MUST**:
+1. Promptly update `doc/TECHNICAL_DOCUMENTATION.md` to reflect the changes.
+2. Update `README.md` if the change affects system architecture, hyperparameter matrix, metrics, testing procedures, or CLI commands.
+3. Document any modified mathematical formulations, equations, or formal invariants.
+
+> **Golden Rule**: No Pull Request or Commit modifying source files under `src/` or artifacts under `artifacts/` may be finalized without corresponding updates to the technical documentation in `doc/`.
 
 ---
 
-## 3. Protocollo di Verifica e Collaudo Obbligatorio
+## 2. Repository Hygiene Standards
+- **Zero bytecode cache**: Never commit `*.pyc` files, `*.egg-info/`, or `__pycache__/` directories.
+- All newly introduced dependencies must be recorded in `requirements.txt`, `pyproject.toml`, and documented in `README.md` and `doc/TECHNICAL_DOCUMENTATION.md`.
+- Always respect and maintain `.gitignore`.
 
-Prima di finalizzare qualsiasi modifica o sottomissione, l'agente IA **DEVE** eseguire i seguenti controlli:
+---
 
-1. **Esecuzione dei Test Unitari e di Integrazione**:
+## 3. Mandatory Testing and Verification Protocol
+
+Before completing any change or submission, the AI agent **MUST** run the following verification steps:
+
+1. **Run Unit and Integration Test Suite**:
    ```bash
-   PYTHONPATH=. pytest -v tests/
+   pytest -v tests/
    ```
-   Tutti i test devono passare con esito `PASSED` (0 errori, 0 fallimenti).
+   All tests must pass (`PASSED`) with zero errors and zero failures.
 
-2. **Verifica della Pipeline di Sintesi ed Esportazione**:
-   Se sono stati modificati il parser, il trainer o la grammatica, rieseguire la sintesi e verificare la rigenerazione coerente degli artefatti:
+2. **Verify End-to-End Synthesis and Export Pipeline**:
+   If changes affect the parser, grammar representation, or trainer, rerun synthesis:
    ```bash
-   PYTHONPATH=. python3 src/neuro_symbolic/synthesize.py
+   python3 src/neuro_symbolic/synthesize.py
    ```
-   Verificare che:
-   - `artifacts/grammar.json` sia valido e parsabile.
-   - `artifacts/grammar.yaml` sia coerente.
-   - `artifacts/DynamicGrammarIta.gf` sia generato correttamente.
-   - La copertura del corpus risulti 100%.
-   - La verifica formale Z3 SMT risulti **UNSAT** (Soundness 100%).
+   Verify that:
+   - `artifacts/grammar.json` is valid and parsable.
+   - `artifacts/grammar.yaml` matches schema.
+   - `artifacts/DynamicGrammarIta.gf` is properly generated.
+   - Corpus coverage rate is strictly 100%.
+   - Formal Z3 SMT verification results in **UNSAT** (100% Soundness).
