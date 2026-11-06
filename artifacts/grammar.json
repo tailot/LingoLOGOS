@@ -4,9 +4,10 @@
     "normal_form": "Chomsky Normal Form (CNF)",
     "non_terminals": [
       "S",
-      "NT_1",
-      "NT_2",
-      "NT_3"
+      "OPN_R",
+      "CLS_R",
+      "OPN_S",
+      "CLS_S"
     ],
     "terminals": [
       "(",
@@ -19,247 +20,48 @@
   "production_rules": [
     {
       "rule": "S -> S S",
-      "probability": 0.0389
+      "probability": 0.1606,
+      "probability_pre_pruning": 0.1605
     },
     {
-      "rule": "S -> S NT_2",
-      "probability": 0.0217
+      "rule": "S -> OPN_R CLS_R",
+      "probability": 0.4022,
+      "probability_pre_pruning": 0.4019
     },
     {
-      "rule": "S -> NT_1 NT_2",
-      "probability": 0.5457
+      "rule": "S -> OPN_S CLS_S",
+      "probability": 0.4373,
+      "probability_pre_pruning": 0.437
     },
     {
-      "rule": "S -> NT_3 S",
-      "probability": 0.2846
+      "rule": "CLS_R -> S CLS_R",
+      "probability": 0.2934,
+      "probability_pre_pruning": 0.2934
     },
     {
-      "rule": "S -> NT_3 NT_2",
-      "probability": 0.026
+      "rule": "CLS_S -> S CLS_S",
+      "probability": 0.3224,
+      "probability_pre_pruning": 0.3224
     },
     {
-      "rule": "NT_1 -> S S",
-      "probability": 0.1016
+      "rule": "OPN_R -> '('",
+      "probability": 1.0,
+      "probability_pre_pruning": 0.999
     },
     {
-      "rule": "NT_1 -> S NT_1",
-      "probability": 0.032
+      "rule": "CLS_R -> ')'",
+      "probability": 0.7066,
+      "probability_pre_pruning": 0.7066
     },
     {
-      "rule": "NT_1 -> S NT_2",
-      "probability": 0.0932
+      "rule": "OPN_S -> '['",
+      "probability": 1.0,
+      "probability_pre_pruning": 0.999
     },
     {
-      "rule": "NT_1 -> S NT_3",
-      "probability": 0.0319
-    },
-    {
-      "rule": "NT_1 -> NT_1 S",
-      "probability": 0.0706
-    },
-    {
-      "rule": "NT_1 -> NT_1 NT_1",
-      "probability": 0.0398
-    },
-    {
-      "rule": "NT_1 -> NT_1 NT_2",
-      "probability": 0.0923
-    },
-    {
-      "rule": "NT_1 -> NT_1 NT_3",
-      "probability": 0.0401
-    },
-    {
-      "rule": "NT_1 -> NT_2 S",
-      "probability": 0.0279
-    },
-    {
-      "rule": "NT_1 -> NT_2 NT_1",
-      "probability": 0.0299
-    },
-    {
-      "rule": "NT_1 -> NT_2 NT_2",
-      "probability": 0.0491
-    },
-    {
-      "rule": "NT_1 -> NT_2 NT_3",
-      "probability": 0.0295
-    },
-    {
-      "rule": "NT_1 -> NT_3 S",
-      "probability": 0.1334
-    },
-    {
-      "rule": "NT_1 -> NT_3 NT_1",
-      "probability": 0.0385
-    },
-    {
-      "rule": "NT_1 -> NT_3 NT_2",
-      "probability": 0.1193
-    },
-    {
-      "rule": "NT_1 -> NT_3 NT_3",
-      "probability": 0.0708
-    },
-    {
-      "rule": "NT_2 -> S S",
-      "probability": 0.1005
-    },
-    {
-      "rule": "NT_2 -> S NT_1",
-      "probability": 0.2078
-    },
-    {
-      "rule": "NT_2 -> S NT_2",
-      "probability": 0.1007
-    },
-    {
-      "rule": "NT_2 -> S NT_3",
-      "probability": 0.0158
-    },
-    {
-      "rule": "NT_2 -> NT_1 S",
-      "probability": 0.0409
-    },
-    {
-      "rule": "NT_2 -> NT_1 NT_1",
-      "probability": 0.0171
-    },
-    {
-      "rule": "NT_2 -> NT_1 NT_2",
-      "probability": 0.0853
-    },
-    {
-      "rule": "NT_2 -> NT_1 NT_3",
-      "probability": 0.0157
-    },
-    {
-      "rule": "NT_2 -> NT_2 S",
-      "probability": 0.086
-    },
-    {
-      "rule": "NT_2 -> NT_2 NT_1",
-      "probability": 0.0156
-    },
-    {
-      "rule": "NT_2 -> NT_2 NT_2",
-      "probability": 0.0885
-    },
-    {
-      "rule": "NT_2 -> NT_2 NT_3",
-      "probability": 0.0162
-    },
-    {
-      "rule": "NT_2 -> NT_3 S",
-      "probability": 0.0833
-    },
-    {
-      "rule": "NT_2 -> NT_3 NT_1",
-      "probability": 0.0165
-    },
-    {
-      "rule": "NT_2 -> NT_3 NT_2",
-      "probability": 0.0856
-    },
-    {
-      "rule": "NT_2 -> NT_3 NT_3",
-      "probability": 0.0243
-    },
-    {
-      "rule": "NT_3 -> S S",
-      "probability": 0.1032
-    },
-    {
-      "rule": "NT_3 -> S NT_1",
-      "probability": 0.0299
-    },
-    {
-      "rule": "NT_3 -> S NT_2",
-      "probability": 0.0905
-    },
-    {
-      "rule": "NT_3 -> S NT_3",
-      "probability": 0.0315
-    },
-    {
-      "rule": "NT_3 -> NT_1 S",
-      "probability": 0.062
-    },
-    {
-      "rule": "NT_3 -> NT_1 NT_1",
-      "probability": 0.0387
-    },
-    {
-      "rule": "NT_3 -> NT_1 NT_2",
-      "probability": 0.0872
-    },
-    {
-      "rule": "NT_3 -> NT_1 NT_3",
-      "probability": 0.0416
-    },
-    {
-      "rule": "NT_3 -> NT_2 S",
-      "probability": 0.0268
-    },
-    {
-      "rule": "NT_3 -> NT_2 NT_1",
-      "probability": 0.0285
-    },
-    {
-      "rule": "NT_3 -> NT_2 NT_2",
-      "probability": 0.0434
-    },
-    {
-      "rule": "NT_3 -> NT_2 NT_3",
-      "probability": 0.0288
-    },
-    {
-      "rule": "NT_3 -> NT_3 S",
-      "probability": 0.1491
-    },
-    {
-      "rule": "NT_3 -> NT_3 NT_1",
-      "probability": 0.0368
-    },
-    {
-      "rule": "NT_3 -> NT_3 NT_2",
-      "probability": 0.1246
-    },
-    {
-      "rule": "NT_3 -> NT_3 NT_3",
-      "probability": 0.0775
-    },
-    {
-      "rule": "S -> '('",
-      "probability": 0.1338
-    },
-    {
-      "rule": "S -> ')'",
-      "probability": 0.2189
-    },
-    {
-      "rule": "S -> '['",
-      "probability": 0.1619
-    },
-    {
-      "rule": "S -> ']'",
-      "probability": 0.4853
-    },
-    {
-      "rule": "NT_1 -> '('",
-      "probability": 0.9982
-    },
-    {
-      "rule": "NT_2 -> ')'",
-      "probability": 0.5801
-    },
-    {
-      "rule": "NT_2 -> ']'",
-      "probability": 0.4178
-    },
-    {
-      "rule": "NT_3 -> '['",
-      "probability": 0.9992
+      "rule": "CLS_S -> ']'",
+      "probability": 0.6776,
+      "probability_pre_pruning": 0.6776
     }
   ]
 }

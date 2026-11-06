@@ -20,7 +20,7 @@ The system integrates continuous representation learning via gradient descent wi
                                      |
                                      v
    +-------------------------------------------------------------------+
-   |          Differentiable CYK Parsing Engine (Inside-Outside)       |
+   |      Differentiable CYK Parsing Engine (Inside, log-semiring)     |
    +-------------------------------------------------------------------+
                     /                                 \
                    v                                   v
@@ -34,7 +34,7 @@ The system integrates continuous representation learning via gradient descent wi
 1. **Neural Encoder Module**: Maps input terminal symbols into a continuous vector space $d_{model}$.
 2. **Differentiable CYK Engine**: Implements the Cocke-Younger-Kasami algorithm in differentiable form using soft semiring operations (`LogSumExp`), enabling backpropagation of gradients through the parsing chart.
 3. **Symbolic Extraction Layer**: Discretizes the weighted rule transition matrix via probability pruning (threshold $\tau = 0.01$) to produce a rigid formal grammar in Chomsky Normal Form (CNF).
-4. **Formal Verification Loop**: Performs static syntax compilation checks, 100% corpus yield coverage tests, and automated formal soundness proofs using the **Z3 SMT Solver**.
+4. **Formal Verification Loop**: Checks the PCFG distribution invariant, compiles the extracted grammar as a Lark (Earley) grammar, proves 100% corpus yield coverage with a discrete CYK, measures rejection of **negative controls**, and proves or refutes the language inclusion $L(G) \subseteq \mathrm{Dyck}\text{-}2$ with the **Z3 SMT solver**.
 
 ---
 
@@ -50,8 +50,12 @@ The PCFG is defined by the 5-tuple $G = (V_N, V_T, R, S, P)$, where:
 - $S \in V_N$: Start symbol.
 - $P$: Probability distribution over production rules.
 
-### 2.2 Differentiable Inside-Outside Tensor Equations
-Let $I(i, j, A)$ be the "Inside" log-probability that substring $x_i \dots x_j$ is derived from non-terminal $A$.
+### 2.2 Differentiable Inside Tensor Equations
+Only the **inside** chart is needed: gradients of the marginal log-likelihood flow directly through the
+`LogSumExp` chart, so no outside pass is implemented (the "Inside-Outside" label of earlier revisions
+was inaccurate).
+
+Let $I(i, j, A)$ be the "Inside" log-probability that substring $x_i \dots x_j$ is derived from non-terminal $A$. Every $\log P(\cdot)$ below is a **jointly normalized** production log-probability as defined in §2.3 (gate $\pi_A$ included).
 
 For substring lengths $L = j - i + 1$:
 
@@ -61,130 +65,125 @@ For substring lengths $L = j - i + 1$:
 - **Recursive Step** ($L > 1$, non-terminals):
   $$I(i, j, A) = \mathrm{LogSumExp}_{k=i}^{j-1} \left( \mathrm{LogSumExp}_{B, C \in V_N} \left( \log P(A \to B C) + I(i, k, B) + I(k+1, j, C) \right) \right)$$
 
-### 2.3 Loss Function and Neural Regularization
-The global objective $\mathcal{L}(\theta)$ combines the negative log-likelihood with an entropy regularization term $H(R)$ to encourage sparse, deterministic grammars:
+### 2.3 Joint Normalization of Productions (Distribution Invariant)
+Every non-terminal $A$ competes over two production families, binary ($A \to B\,C$) and terminal ($A \to a$). The model allocates a **Bernoulli family gate** $\pi_A$ per non-terminal:
 
-$$\mathcal{L}(\theta) = -\frac{1}{|D|} \sum_{X \in D} \log P(S \stackrel{*}{\Rightarrow} X \mid \theta) + \lambda_1 \sum_{A \in V_N} H(P(A \to \cdot)) + \lambda_2 \|\theta\|_2^2$$
+$$\pi_A = \sigma(\phi_A), \qquad
+P(A \to B\,C) = \pi_A \cdot \mathrm{softmax}_{\theta}\big(r_{A}\big)_{B,C}, \qquad
+P(A \to a) = (1-\pi_A) \cdot \mathrm{softmax}_{\theta}\big(t_{A}\big)_{a}$$
 
-where entropy over productions is defined as:
-$$H(P(A \to \cdot)) = -\sum_{\alpha} P(A \to \alpha) \log P(A \to \alpha)$$
+which enforces the **distribution invariant**
+
+$$\sum_{B,C \in V_N} P(A \to B\,C) \; + \; \sum_{a \in V_T} P(A \to a) \; = \; 1 \qquad \forall A \in V_N$$
+
+> Historical note: earlier revisions normalized the two families independently, giving every
+> left-hand side total mass $2$. Marginal string probabilities were therefore inflated and the
+> reported perplexity was an artifact. `DifferentiableCYKParser.production_mass_per_lhs()` and
+> the `G1` acceptance gate now check this invariant numerically (error $< 10^{-6}$).
+
+### 2.4 Loss Function and Neural Regularization
+The global objective $\mathcal{L}(\theta)$ combines the negative log-likelihood with an entropy regularizer $H(A)$ defined on the **mixture** of the two production families, so that sharpening the gate is penalized too:
+
+$$\mathcal{L}(\theta) = -\frac{1}{|D|} \sum_{X \in D} \log P(S \stackrel{*}{\Rightarrow} X \mid \theta) + \lambda_1 \sum_{A \in V_N} H(A) + \lambda_2 \|\theta\|_2^2$$
+
+$$H(A) = H_b(\pi_A) + \pi_A \, H\big(P(A \to \cdot\,\cdot)\big) + (1-\pi_A)\, H\big(P(A \to \cdot)\big)$$
+
+where $H_b$ is the binary entropy. Temperature annealing $\tau : \tau_{\text{start}} \rightarrow \tau_{\text{end}}$ is applied during training so that the discrete pruning read-out ($\tau_{\text{prune}} = 0.01$) is consistent with the distribution actually optimized.
 
 ---
 
 ## 3. Synthetic Data and Validation Metrics
 
-Evaluation is performed by comparing the induced grammar against the ground-truth grammar of the controlled formal language **Dyck-2** (balanced parentheses and brackets).
+Evaluation compares the induced grammar with the ground-truth grammar of the controlled formal language **Dyck-2** (balanced parentheses and brackets), on a **phrase-level train/test split** (100 unique sentences: 75 train / 25 test), plus 200 automatically generated **negative controls** (perturbations that provably fall outside Dyck-2).
 
-| Metric Parameter | Mathematical Definition / Target | Achieved Value | Acceptance Target |
+| Metric | Definition | Measured (seed 42) | Acceptance Target |
 | :--- | :--- | :--- | :--- |
-| **Parsing Precision (F1)** | $\frac{2 \cdot \text{Precision} \cdot \text{Recall}}{\text{Precision} + \text{Recall}}$ | **1.000** | $\ge 0.900$ |
-| **Perplexity per Symbol (PPL)** | $\exp\left(-\frac{1}{N} \sum \log P(x_i \mid x_{<i})\right)$ | **1.59** | $\le 1.25$ (asymptotic convergence) |
-| **Rule Sparsity** | $\frac{|\{r \in R \mid P(r) < 10^{-4}\}|}{|R|}$ | Pruned at $\tau=0.01$ | High determinism |
-| **Tree Depth Bias** | $\mathbb{E}[d_{\text{pred}}] - \mathbb{E}[d_{\text{true}}]$ | $\approx 0$ | Minimal divergence |
-| **Convergence Stability** | Gradient norm stability $\nabla_\theta \mathcal{L}$ over 1k steps | $< 1.0 \times 10^{-4}$ | Stable without exploding gradients |
+| **Corpus coverage (CYK)** | $\frac{1}{|D|}\sum_s \mathbb{1}\!\left[\exists\, T: S \Rightarrow^\ast T,\ \mathrm{Yield}(T)=s\right]$ | **100.0%** | $100\%$ |
+| **Negative-control rejection** | Fraction of out-of-language strings **not** derivable in the extracted grammar | **100.0%** (200/200) | $\ge 99.9\%$ |
+| **Gold rule F1** | $F_1$ between extracted and gold rules, best non-terminal alignment | **1.000** ($P=R=1.000$) | $\ge 0.900$ |
+| **Perplexity per symbol (hold-out)** | $\exp\!\left(-\frac{1}{N}\sum_{X\in D}\log P(S \Rightarrow^\ast X)\right)$ (marginal) | **2.86** | $\le 1.25$ — *not met, see notes* |
+| **Rule sparsity** | $\frac{|\{r \in R_{\max} \mid P(r) < 10^{-4}\}|}{|R_{\max}|}$ | **0.917** (133 of 145 productions) | High determinism |
+| **Distribution invariant error** | $\max_A \left| \sum_\alpha P(A \to \alpha) - 1 \right|$ | **1.2e-07** | $< 10^{-5}$ |
+| **SMT certificate** | Verdict of $L(G) \subseteq \mathrm{Dyck}\text{-}2$ | **UNSAT** (proved) | UNSAT |
+
+### Honest notes on these metrics
+- **Marginal, not conditional perplexity.** A chart parser exposes $P(S \Rightarrow^\ast X)$, not $P(x_i \mid x_{<i})$. The reported PPL is therefore a *marginal per-symbol* figure; it is not comparable with autoregressive language-model perplexity, and the $\le 1.25$ target of the original spec has not been reached (measured 2.86 on the hold-out with the current 60-epoch budget).
+- **The former "Parsing F1 = 1.000" was vacuous** and has been removed: it merely counted sentences whose inside probability was non-zero, which a dense PCFG achieves for *any* bracket string (including `]`, `(]` and `)(`). Selectivity is now measured by negative controls and gold-rule alignment.
+- **Prior initialization is disclosed.** The default run seeds the logits with the gold Dyck-2 CNF (`--init prior`). The random-initialization ablation (`--init random`) is reported in `doc/TECHNICAL_DOCUMENTATION.md`: within the tested budget it does **not** recover the gold grammar (gold rule F1 $\approx 0.42$, extracted grammar over-generates `(]`).
 
 ---
 
 ## 4. Description of Generated Grammar Artifacts
 
-The synthesis process outputs discrete formal artifacts in JSON, YAML, and Grammatical Framework (`.gf`) formats. The structure extracted after pruning ($\tau = 0.01$) is stored in `artifacts/`:
+The synthesis process outputs discrete formal artifacts in JSON, YAML, and Grammatical Framework (`.gf`) formats, plus a machine-readable verification report (`artifacts/metrics.json`). The structure extracted after pruning ($\tau_{\text{prune}} = 0.01$) with per-non-terminal renormalization is stored in `artifacts/`:
 
-### YAML Grammar (`artifacts/grammar.yaml`)
+### YAML Grammar (`artifacts/grammar.yaml`, seed 42 run)
 ```yaml
 grammar_metadata:
   type: Probabilistic Context-Free Grammar (PCFG)
   normal_form: Chomsky Normal Form (CNF)
-  non_terminals: [S, NT_1, NT_2, NT_3]
+  non_terminals: [S, OPN_R, CLS_R, OPN_S, CLS_S]
   terminals: ['(', ')', '[', ']']
   start_symbol: S
 
 production_rules:
-  - rule: S -> NT_1 NT_2
-    probability: 0.5457
-  - rule: S -> NT_3 S
-    probability: 0.2846
-  - rule: NT_1 -> '('
-    probability: 0.9982
-  - rule: NT_2 -> ')'
-    probability: 0.5801
-  - rule: NT_2 -> ']'
-    probability: 0.4178
-  - rule: NT_3 -> '['
-    probability: 0.9992
+- rule: S -> S S            # probability: 0.1606   (pre-pruning 0.1605)
+- rule: S -> OPN_R CLS_R    # probability: 0.4022   (pre-pruning 0.4019)
+- rule: S -> OPN_S CLS_S    # probability: 0.4373   (pre-pruning 0.4370)
+- rule: CLS_R -> S CLS_R    # probability: 0.2934
+- rule: CLS_S -> S CLS_S    # probability: 0.3224
+- rule: OPN_R -> '('        # probability: 1.0000   (pre-pruning 0.9990)
+- rule: CLS_R -> ')'        # probability: 0.7066
+- rule: OPN_S -> '['        # probability: 1.0000   (pre-pruning 0.9990)
+- rule: CLS_S -> ']'        # probability: 0.6776
 ```
+
+This is exactly the ground-truth Dyck-2 CNF skeleton
+($S \to S\,S \mid O_R C_R \mid O_S C_S$, $C_R \to S\,C_R \mid \texttt{)}$, $C_S \to S\,C_S \mid \texttt{]}$, $O_R \to \texttt{(}$, $O_S \to \texttt{[}$):
+9 rules out of the 145 possible productions, every left-hand side summing to $1$.
+`probability_pre_pruning` records the raw model mass before the $\tau$ cut, so the renormalization applied after pruning remains auditable.
 
 ---
 
-## 5. Inference Engine Tuning (Hyperparameters)
+## 5. Training Tuning (Hyperparameters)
 
-Performance relies on the hyperparameter matrix of the optimization solver:
+Defaults of `src/neuro_symbolic/synthesize.py` (all overridable from the CLI, see §10):
 
-| Hyperparameter | Optimal Value | Search Range | Description |
+| Hyperparameter | Default | Search Range | Description |
 | :--- | :--- | :--- | :--- |
-| `learning_rate` | $3.5 \times 10^{-3}$ | $[10^{-4}, 10^{-2}]$ | Learning rate for the AdamW optimizer. |
-| `temperature_tau` ($\tau$) | $0.75$ | $[0.1, 2.0]$ | Annealing temperature for rule Softmax. |
-| `entropy_penalty` ($\lambda_1$) | $0.05$ | $[0.001, 0.5]$ | Coefficient for formal entropy penalty. |
+| `--seed` | $42$ | — | Seeds dataset generation, split, initialization and negative controls. |
+| `--init` | `prior` | `prior`, `random` | `prior` seeds the gold Dyck-2 CNF structure; `random` starts from $\mathcal{N}(0, 0.5)$. |
+| `--num-nt` ($K$) | $5$ | $[4, 8]$ | Number of non-terminals (Dyck-2 CNF needs 5). |
+| `learning_rate` | $1.0 \times 10^{-2}$ | $[10^{-4}, 3 \times 10^{-2}]$ | AdamW learning rate. |
+| `tau_start -> tau` | $1.0 \rightarrow 0.5$ | $[0.1, 2.0]$ | Linear temperature annealing; the final value also drives extraction. |
+| `entropy_penalty` ($\lambda_1$) | $0.5$ | $[0.01, 2.0]$ | Mixture-entropy regularizer; values $\le 0.05$ leave the grammar dense (see §3). |
 | `weight_decay` ($\lambda_2$) | $1.0 \times 10^{-4}$ | $[0, 10^{-2}]$ | L2 regularization for weight stability. |
-| `max_seq_length` | $64$ | $[16, 256]$ | Maximum sequence length processed in a single pass. |
+| `max_grad_norm` | $1.0$ | $[0.5, 5.0]$ | Gradient clipping (torch default in `GrammarTrainer`); without it the sharpening phase diverges. |
+| `--epochs` / `--batch-size` | $60$ / $8$ | $[15, 200]$ / $[4, 32]$ | Batches are grouped by sentence length for homogeneous CYK charts. |
+| `--prune` ($\tau_{\text{prune}}$) | $0.01$ | $[10^{-3}, 10^{-1}]$ | Production pruning threshold, followed by per-LHS renormalization. |
+| `--search-bound` | $6$ | $[4, 10]$ | Exhaustive counterexample search length for the soundness check. |
+| `max_seq_length` | $12$ (data), $64$ (engine) | $[16, 256]$ | Maximum sequence length processed in a single CYK pass. |
+
+> Reproducibility note: no bit-exact artifact reproducibility is guaranteed across PyTorch
+> versions or devices (no `torch.use_deterministic_algorithms`, cuDNN kernels are non-deterministic).
+> The seed makes a run repeatable on the same machine and build; the acceptance gates in §9, not
+> byte-identical artifacts, are what the CI enforces.
 
 ---
 
-## 6. PyTorch Implementation: Differentiable CYK Parser
+## 6. Differentiable CYK Core
 
-The computational core is in `src/neuro_symbolic/parser.py`:
+The computational core lives in `src/neuro_symbolic/parser.py` (not duplicated here, so the
+documentation cannot drift away from the code). Its contract:
 
-```python
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-class DifferentiableCYKParser(nn.Module):
-    """
-    Differentiable parsing engine based on the CYK algorithm (Inside step).
-    Computes marginal sequence log-likelihood under a parameterized PCFG.
-    """
-    def __init__(self, num_non_terminals: int, vocab_size: int, temperature: float = 1.0):
-        super(DifferentiableCYKParser, self).__init__()
-        self.num_nt = num_non_terminals
-        self.vocab_size = vocab_size
-        self.temperature = temperature
-
-        # Non-terminal parameters: P(A -> B, C) in Log-space: [NT, NT, NT]
-        self.rule_logits = nn.Parameter(torch.randn(self.num_nt, self.num_nt, self.num_nt) * 0.1)
-        # Terminal parameters: P(A -> a) in Log-space: [NT, Vocab]
-        self.term_logits = nn.Parameter(torch.randn(self.num_nt, self.vocab_size) * 0.1)
-
-    def forward(self, x: torch.Tensor, temperature: float = None) -> torch.Tensor:
-        batch_size, seq_len = x.shape
-        device = x.device
-
-        log_rules = self.get_log_rules(temperature)
-        log_terms = self.get_log_terms(temperature)
-
-        chart = torch.full((batch_size, seq_len, seq_len, self.num_nt), fill_value=-1e9, device=device)
-
-        # Base case (L = 1)
-        for i in range(seq_len):
-            tokens = x[:, i]
-            for nt in range(self.num_nt):
-                chart[:, 0, i, nt] = log_terms[nt, tokens]
-
-        # Recursive step (L = 2..seq_len)
-        for length in range(2, seq_len + 1):
-            l_idx = length - 1
-            for i in range(seq_len - length + 1):
-                j = i + length - 1
-                split_logs = []
-                for k in range(i, j):
-                    left_inside = chart[:, k - i, i, :].unsqueeze(2)
-                    right_inside = chart[:, j - (k + 1), k + 1, :].unsqueeze(1)
-                    pair_inside = left_inside + right_inside
-                    combined = torch.logsumexp(pair_inside.unsqueeze(1) + log_rules.unsqueeze(0), dim=(-2, -1))
-                    split_logs.append(combined)
-                chart[:, l_idx, i, :] = torch.logsumexp(torch.stack(split_logs, dim=-1), dim=-1)
-
-        return chart[:, seq_len - 1, 0, 0]
-```
+- `get_log_rules()` / `get_log_terms()` return log-productions **including the family gate**,
+  i.e. $\log \pi_A + \log \mathrm{softmax}(r_A)$ and $\log(1-\pi_A) + \log \mathrm{softmax}(t_A)$.
+- `forward(x, temperature)` runs the inside CYK in the log semiring over span chart
+  `chart[b, length-1, i, A]`, returning $\log P(S \Rightarrow^\ast X)$ per sentence.
+- `production_mass_per_lhs()` must return $1$ for every non-terminal (invariant of §2.3).
+- `parse_viterbi(tokens)` returns the most probable derivation tree (backpointer CYK), used as
+  constructive evidence by the verifier.
+- `rule_entropy()` is the mixture entropy $H(A)$ of §2.4.
 
 ---
 
@@ -194,31 +193,34 @@ class DifferentiableCYKParser(nn.Module):
 .
 ├── .github/
 │   └── workflows/
-│       └── ci.yml               # GitHub Actions CI workflow (Python 3.10, 3.11, 3.12)
+│       └── ci.yml                 # GitHub Actions CI workflow (Python 3.10, 3.11, 3.12)
 ├── artifacts/
-│   ├── DynamicGrammarIta.gf     # Grammatical Framework grammar (abstract + concrete)
-│   ├── grammar.json             # Discrete CNF productions in JSON format
-│   ├── grammar.yaml             # Discrete CNF productions in YAML format
-│   └── grammar_weights.pt       # Saved PyTorch parameter checkpoint
+│   ├── DynamicGrammarIta.gf       # Grammatical Framework grammar (abstract + concrete)
+│   ├── grammar.json               # Discrete CNF productions in JSON format
+│   ├── grammar.yaml               # Discrete CNF productions in YAML format
+│   ├── grammar_weights.pt         # Saved PyTorch checkpoint (rule / term / family logits)
+│   └── metrics.json               # Metrics, verification report and acceptance gates
 ├── doc/
 │   └── TECHNICAL_DOCUMENTATION.md # Comprehensive engineering and mathematical docs
 ├── src/
 │   └── neuro_symbolic/
-│       ├── __init__.py          # Package public interface
-│       ├── parser.py            # DifferentiableCYKParser & Viterbi AST extraction
-│       ├── grammar.py           # PCFGrammar, Symbol, ProductionRule, JSON/YAML/GF/Lark exporters
-│       ├── trainer.py           # DyckDataset & GrammarTrainer (AdamW, Entropy, NLL)
-│       ├── verification.py      # GrammarVerifier (Lark, Yield coverage, Z3 SMT check)
-│       └── synthesize.py        # End-to-end synthesis & export pipeline
+│       ├── __init__.py            # Package public interface
+│       ├── parser.py              # DifferentiableCYKParser, family gate, Viterbi AST extraction
+│       ├── grammar.py             # PCFGrammar, Symbol, ProductionRule, CYK derive, JSON/YAML/GF/Lark exporters
+│       ├── trainer.py             # DyckDataset (train/test split) & GrammarTrainer (AdamW, annealing)
+│       ├── reference.py           # Gold Dyck-2 CNF, gold prior init, negative controls, gold rule F1
+│       ├── verification.py        # GrammarVerifier (Lark, coverage, negative controls, Z3 inclusion)
+│       └── synthesize.py          # End-to-end synthesis, verification gates and export pipeline
 ├── tests/
-│   ├── test_parser.py           # Differentiability, tensor shapes, and Viterbi tests
-│   ├── test_grammar.py          # Serialization and pruning tests
-│   ├── test_trainer.py          # Dyck-2 training loop and metric evaluations
-│   └── test_verification.py     # Lark syntax and Z3 SMT soundness (UNSAT) tests
-├── AGENTS.md                    # Mandatory instructions for AI agents
-├── pyproject.toml               # Build metadata, packaging, and pytest configuration
-├── requirements.txt             # Project dependencies
-└── README.md                    # System documentation
+│   ├── test_parser.py             # Differentiability, tensor shapes, mass invariant, Viterbi vs inside
+│   ├── test_grammar.py            # Serialization, pruning, post-pruning renormalization, derive()
+│   ├── test_trainer.py            # Training loop, train/test split, metric definitions
+│   ├── test_reference.py          # Gold CNF, negative controls, gold rule F1 sanity
+│   └── test_verification.py       # Z3 certificate (UNSAT) and refutation of over-generating grammars
+├── AGENTS.md                      # Mandatory instructions for AI agents
+├── pyproject.toml                 # Build metadata, packaging, and pytest configuration
+├── requirements.txt               # Project dependencies
+└── README.md                      # System documentation
 ```
 
 ---
@@ -227,39 +229,50 @@ class DifferentiableCYKParser(nn.Module):
 
 The final output is an **Hybrid Neural-Symbolic Model**, comprising:
 1. **Neural Weights & Embeddings Module (`artifacts/grammar_weights.pt`)**:
-   Tensors representing rule and emission transition logits (`rule_logits` and `term_logits`).
+   Tensors `rule_logits` ($K^3$), `term_logits` ($K \times |V_T|$) and `family_logits` ($K$, the Bernoulli gate $\pi_A$ of §2.3), plus the run configuration in `metadata`.
 2. **Discrete Formal Grammar (`artifacts/grammar.json`, `artifacts/grammar.yaml`, `artifacts/DynamicGrammarIta.gf`)**:
-   Rigid CNF productions extracted post-pruning ($\tau = 0.01$), suitable for formal compilers or symbolic parsers.
-3. **Parsing and Validation Runtime (`src/neuro_symbolic/`)**:
+   Rigid CNF productions extracted post-pruning ($\tau_{\text{prune}} = 0.01$) and renormalized per non-terminal, with `probability_pre_pruning` kept for audit; suitable for formal compilers or symbolic parsers.
+3. **Verification Report (`artifacts/metrics.json`)**:
+   Train/hold-out metrics, per-non-terminal masses, gold-rule alignment, negative-control results, the Z3 verdict with its counter certificate, and the boolean acceptance gates.
+4. **Parsing and Validation Runtime (`src/neuro_symbolic/`)**:
    Executable Python modules capable of parsing raw token sequences and emitting verified Abstract Syntax Trees (ASTs).
 
 ---
 
 ## 9. Formal Verification and Testing Procedure
 
-Formal verification guarantees **100% Soundness** and zero syntactic hallucinations across four stages:
+Verification runs as four **acceptance gates** that `synthesize.py` evaluates and records in
+`artifacts/metrics.json` (the exit code becomes non-zero on failure unless `--lenient` is passed):
 
-1. **Static Syntax Proof (0 Syntactic Hallucinations)**:
-   - Verification using formal parser tools (Lark Earley / GF), yielding `Exit Code 0` with zero grammar exceptions.
-2. **Corpus Coverage Proof (Coverage Rate = 100%)**:
-   - For every sample sequence $s \in D$, checks that $\text{Yield}(T^*) = s$ with $P(T^*) > 0$.
-3. **Neural Loss Convergence**:
-   - Regularized training ensures entropy $H(R)$ drops as distributions concentrate onto deterministic productions.
-4. **SMT Solver Verification Loop (Z3 Model Checking)**:
-   - Maps the AST into First-Order Logic (FOL) constraints representing bracket depth transitions and invariants.
-   - Solves for counterexamples on the negation of the thesis:
-     $$\text{Solver.check}(P \wedge \neg G)$$
-   - **UNSAT Result**: Formal mathematical proof that the balance invariants strictly hold (100% Soundness).
-   - **SAT Result**: Counterexample extraction if an invariant is violated.
+1. **G1 — Grammar validity**:
+   - `verify_lark_compilation()`: the exported EBNF compiles as a Lark Earley grammar (compilability only — it proves nothing about the generated language).
+   - `verify_pcfg_distribution()`: $\left|\sum_\alpha P(A \to \alpha) - 1\right| < 10^{-6}$ for every non-terminal $A$.
+2. **G2 — Corpus coverage (Coverage Rate = 100%)**:
+   - `verify_corpus_coverage()` runs a **discrete CYK** (`PCFGrammar.derive`) over the corpus: a constructive derivation proof per sentence. The Lark Earley variant stays available as a cross-check (`engine="lark"`).
+3. **G3 — Selectivity on negative controls**:
+   - `verify_negative_controls()` measures the rejection rate over perturbed strings that provably lie outside Dyck-2 (bracket-type swaps, insertions, deletions, reversals, random words). A dense grammar scores badly here: the grammar shipped before this revision accepted `]`, `(]` and `)(`.
+   - `gold_rule_f1()` adds a structural measure (precision / recall of the rule set against the gold CNF under the best non-terminal alignment).
+4. **G4 — SMT language inclusion ($L(G) \subseteq \mathrm{Dyck}\text{-}2$)**:
+   - `verify_language_soundness()` first searches exhaustively for a **witness**: a string generated by $G$ (derivation tree included) that violates the bracket invariant, up to `--search-bound`.
+   - Otherwise it asks Z3 for a **counter certificate** $(\delta_r, \delta_s, m_r, m_s)_A$ per non-terminal, constrained by the transfer equations
 
-### Verification Matrix
+$$A \to a:\ \delta = e(a),\ m = e(a) \qquad A \to B\,C:\ \delta = \delta_B + \delta_C,\ m = \min(m_B,\ \delta_B + m_C)$$
+
+   - If that system is satisfiable and the start symbol satisfies $\delta = 0 \wedge m \ge 0$, then adding $\neg G$ makes the solver answer **UNSAT**: by induction on derivation depth no sentential form can break the prefix invariant, so no syntactic hallucination is derivable — at any length, not merely up to the search bound.
+   - **Refutation** is reported when a witness exists (`SAT`, with the offending string and its tree), as asserted by `tests/test_verification.py::test_overgenerating_grammar_is_refuted`.
+   - **Caveats, stated openly**: the certificate is *sound but incomplete* (a language-correct grammar may admit no per-non-terminal signature, yielding `INCONCLUSIVE`), and witness search is bounded by `--search-bound`. The former single-string check `check_word_balance_z3()` is kept only for diagnosis: the prefix invariant now sits in the **thesis** behind a premise-consistency guard, because the previous encoding put it among the premises and returned vacuous `UNSAT / sound` verdicts for `())`, `)(` and `][`.
+
+### Verification Matrix (seed 42 run, `python src/neuro_symbolic/synthesize.py`)
 
 | Component Under Test | Verification Tool | Acceptance Criterion | Result |
 | :--- | :--- | :--- | :--- |
-| **Grammar Syntax** | Lark Parser / GF | Exit Code 0, valid AST with 0 exceptions | **PASS (100%)** |
-| **Deterministic Parsing** | `DifferentiableCYKParser` | Parsing F1 $\ge 0.90$ & controlled PPL | **PASS (F1 = 1.00)** |
-| **Corpus Coverage** | Yield check on Dyck-2 | 100% coverage rate | **PASS (100.0%)** |
-| **Logical Soundness** | Z3 SMT Solver | **UNSAT** on $P \wedge \neg G$ | **PASS (UNSAT, 100% Soundness)** |
+| **Grammar compilability** | Lark Earley (`verify_lark_compilation`) | 0 grammar exceptions | **PASS** |
+| **PCFG distribution invariant** | `verify_pcfg_distribution` | Mass $=1$ per non-terminal (error $< 10^{-5}$) | **PASS (1.2e-07)** |
+| **Corpus coverage** | Discrete CYK (`verify_corpus_coverage`) | 100% coverage rate | **PASS (100.0%)** |
+| **Selectivity (negative controls)** | `verify_negative_controls` | 100% rejection of 200 non-Dyck strings | **PASS (200/200)** |
+| **Rule induction quality** | `gold_rule_f1` | $F_1 \ge 0.90$ under NT alignment | **PASS (1.000)** |
+| **Language inclusion** | Z3 SMT Solver | **UNSAT** on certificate $+ \neg G$ | **PASS (UNSAT)** |
+| **Unit / integration tests** | pytest | All tests PASSED | **PASS (43 passed)** |
 
 ---
 
@@ -284,6 +297,31 @@ To train the parser on Dyck-2, compute metrics, export grammar artifacts, and ru
 ```bash
 python3 src/neuro_symbolic/synthesize.py
 ```
+
+The artifacts directory is resolved against the **repository root**, so the command works from any
+working directory. The process exits with a **non-zero status when any acceptance gate fails**, which
+is what `.github/workflows/ci.yml` relies on; add `--lenient` to keep exit code 0 for exploratory runs.
+
+### Command-Line Interface
+```bash
+python3 src/neuro_symbolic/synthesize.py --epochs 120 --lr 3e-3 --init random --search-bound 8
+```
+
+| Flag | Default | Purpose |
+| :--- | :--- | :--- |
+| `--seed` | `42` | Seed for dataset, split, initialization, negative controls. |
+| `--init {prior,random}` | `prior` | Seed logits with the gold Dyck-2 CNF (`reference.py`) or start from noise. |
+| `--num-nt` | `5` | Latent non-terminals. |
+| `--num-samples`, `--max-depth`, `--max-length` | `100`, `3`, `12` | Dyck-2 corpus generation. |
+| `--test-fraction` | `0.25` | Phrase-level train/test split (disjoint sentences). |
+| `--epochs`, `--batch-size`, `--lr` | `60`, `8`, `1.0e-2` | Optimization budget (batches grouped by sentence length). |
+| `--tau`, `--tau-start` | `0.5`, `1.0` | Temperature annealing; `--tau` also drives extraction. |
+| `--entropy-penalty`, `--weight-decay` | `0.5`, `1.0e-4` | Regularizers of §2.4. |
+| `--prune` | `0.01` | Pruning threshold before per-LHS renormalization. |
+| `--search-bound` | `6` | Counterexample search length for gate G4. |
+| `--artifacts-dir` | `artifacts` | Output directory (relative paths resolve against the repo root). |
+| `--list-only` | off | Load an existing checkpoint / artifacts and re-run verification without training. |
+| `--lenient` | off | Report gate failures without a non-zero exit code. |
 
 ### Running Test Suite
 Execute unit and integration tests:

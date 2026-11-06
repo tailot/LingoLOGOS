@@ -11,8 +11,8 @@ from .grammar import PCFGrammar
 
 class DyckDataset(Dataset):
     """
-    Generatore e contenitore di campioni per il linguaggio formale Dyck-2 (parentesi tonde e quadre).
-    Vocabolario: 0: '(', 1: ')', 2: '[', 3: ']'
+    Sample generator and container for the formal Dyck-2 language (round and square brackets).
+    Vocabulary: 0: '(', 1: ')', 2: '[', 3: ']'
     """
 
     VOCAB = ["(", ")", "[", "]"]
@@ -36,7 +36,7 @@ class DyckDataset(Dataset):
         seed: int = 42,
     ) -> "DyckDataset":
         """
-        Genera frasi bilanciate non vuote di Dyck-2 con lunghezza pari limitata.
+        Generates non-empty balanced Dyck-2 sentences of bounded even length.
         """
         random.seed(seed)
         samples_set = set()
@@ -66,11 +66,32 @@ class DyckDataset(Dataset):
         samples = [[cls.VOCAB_MAP[c] for c in s] for s in sorted(list(samples_set))]
         return cls(samples)
 
+    def split(
+        self,
+        test_fraction: float = 0.25,
+        seed: int = 42,
+    ) -> Tuple["DyckDataset", "DyckDataset"]:
+        """
+        Random train / test split OVER SENTENCES (the dataset holds unique sentences, so the
+        split is duplicate-free by construction).
+        Returns (train, test) as two disjoint DyckDataset objects.
+        """
+        shuffled = list(self.samples)
+        rng = random.Random(seed)
+        rng.shuffle(shuffled)
+        cut = max(1, int(round(len(shuffled) * (1.0 - test_fraction))))
+        return DyckDataset(shuffled[:cut]), DyckDataset(shuffled[cut:])
+
+    def as_strings(self) -> List[str]:
+        """Decodes the dataset sentences into strings of terminals."""
+        inverse = {index: symbol for symbol, index in self.VOCAB_MAP.items()}
+        return ["".join(inverse[token] for token in sample) for sample in self.samples]
+
 
 class GrammarTrainer:
     """
-    Pipeline di training per induzione grammaticale neuro-simbolica.
-    Ottimizza la loss con NLL marginale + regolarizzazione d'entropia H(R) + L2 weight decay.
+    Training pipeline for neuro-symbolic grammar induction.
+    Optimizes marginal NLL + entropy regularizer H(R) + L2 weight decay.
     """
 
     def __init__(
@@ -80,12 +101,16 @@ class GrammarTrainer:
         temperature_tau: float = 0.75,
         entropy_penalty: float = 0.05,
         weight_decay: float = 1e-4,
+        max_grad_norm: Optional[float] = 1.0,
     ):
         self.parser = parser
         self.learning_rate = learning_rate
         self.temperature_tau = temperature_tau
         self.entropy_penalty = entropy_penalty
         self.weight_decay = weight_decay
+        # Gradient clipping: PCFG logits can grow a lot during temperature annealing;
+        # without clipping the last steps diverge.
+        self.max_grad_norm = max_grad_norm
 
         self.optimizer = torch.optim.AdamW(
             self.parser.parameters(),
@@ -98,7 +123,7 @@ class GrammarTrainer:
         batch_x: torch.Tensor,
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
         """
-        Calcola la loss globale:
+        Computes the global objective:
         L(theta) = - 1/|D| sum log P(S => X) + lambda_1 sum H(P(A -> .))
         """
         log_prob = self.parser(batch_x, temperature=self.temperature_tau)
@@ -115,7 +140,7 @@ class GrammarTrainer:
 
     def train_epoch(self, dataset: DyckDataset, batch_size: int = 16) -> Dict[str, float]:
         self.parser.train()
-        # Raggruppa per lunghezza per batching omogeneo nel CYK
+        # Group by length to keep CYK batches homogeneous
         samples_by_len: Dict[int, List[List[int]]] = {}
         for s in dataset.samples:
             samples_by_len.setdefault(len(s), []).append(s)
@@ -135,7 +160,12 @@ class GrammarTrainer:
                 loss, metrics = self.compute_loss(x)
                 loss.backward()
 
-                # Monitor stabilità gradienti
+                if self.max_grad_norm is not None:
+                    torch.nn.utils.clip_grad_norm_(
+                        self.parser.parameters(), self.max_grad_norm
+                    )
+
+                # Monitor gradient stability
                 grad_norm = 0.0
                 for p in self.parser.parameters():
                     if p.grad is not None:
@@ -163,12 +193,28 @@ class GrammarTrainer:
 
     def evaluate(self, dataset: DyckDataset) -> Dict[str, float]:
         """
-        Calcola Perplessità per Simbolo (PPL), Parsing Precision/Recall (F1) e Sparsità.
+        Model-level metrics on a dataset (report the TEST block, not the training one).
+
+        - `mean_nll_per_symbol` : -(1 / N_symbols) * sum_X log P(S =>* X) over the corpus.
+          This is a cross-entropy: the lower bound is 0 and there is no upper bound
+          (an untrained parser can exceed the 2 bits per symbol of log2(|vocab|)).
+          Under the distribution invariant (the productions of every non-terminal sum to 1)
+          the value is however comparable with the perplexities reported in the literature.
+        - `ppl_per_symbol`      : exp(mean_nll_per_symbol). This is a MARGINAL perplexity
+          per symbol: exp(-(1/N) sum log P(X)), not the autoregressive conditional
+          perplexity exp(-(1/N) sum log P(x_i | x_<i)). A chart parser does not expose
+          position-wise conditional distributions, so the definition must be stated.
+        - `model_coverage`      : fraction of sentences with non-zero inside probability.
+          NB: this is NOT parsing accuracy. A dense PCFG has coverage ~1 on any string;
+          correctness is measured by the negative controls
+          (GrammarVerifier.verify_negative_controls) and by the gold rule F1.
+        - `rule_sparsity`       : fraction of productions with P < 1e-4.
+        - `max_lhs_mass_error`  : largest deviation from unit mass per non-terminal.
         """
         self.parser.eval()
         total_log_prob = 0.0
         total_symbols = 0
-        valid_parses = 0
+        parsable = 0
 
         with torch.no_grad():
             for s in dataset.samples:
@@ -176,26 +222,31 @@ class GrammarTrainer:
                 lp = self.parser(x, temperature=self.temperature_tau).item()
                 if lp > -1e8:
                     total_log_prob += lp
-                    valid_parses += 1
+                    parsable += 1
                 total_symbols += len(s)
 
-        # Perplessità per Simbolo: exp(- 1/N sum log P(x_i | x_{<i}))
-        # con sum log P(X) = total_log_prob
-        ppl = math.exp(-total_log_prob / max(total_symbols, 1)) if total_symbols > 0 else float("inf")
-        parse_f1 = valid_parses / max(len(dataset.samples), 1)
+        # Information-theoretic cost per symbol: -(1/N) * sum_X log P(S =>* X)
+        mean_nll_per_symbol = -total_log_prob / max(total_symbols, 1)
+        ppl = math.exp(min(mean_nll_per_symbol, 60.0)) if total_symbols > 0 else float("inf")
 
-        # Sparsità delle Regole: percentuale di regole con P(r) < 1e-4
-        log_rules = self.parser.get_log_rules()
-        log_terms = self.parser.get_log_terms()
+        # Fraction of productions with P(r) < 1e-4 over the joint distribution
+        # (the family gate is already included in those probabilities)
+        log_rules = self.parser.get_log_rules(self.temperature_tau)
+        log_terms = self.parser.get_log_terms(self.temperature_tau)
         p_rules = torch.exp(log_rules).view(-1)
         p_terms = torch.exp(log_terms).view(-1)
         all_probs = torch.cat([p_rules, p_terms])
         sparse_count = (all_probs < 1e-4).float().sum().item()
         sparsity = sparse_count / all_probs.numel()
 
+        # Learned distribution invariant: the mass per non-terminal must equal 1
+        masses = self.parser.production_mass_per_lhs(self.temperature_tau)
+
         return {
-            "perplexity": ppl,
-            "parsing_f1": parse_f1,
+            "mean_nll_per_symbol": mean_nll_per_symbol,
+            "ppl_per_symbol": ppl,
+            "model_coverage": parsable / max(len(dataset.samples), 1),
             "rule_sparsity": sparsity,
-            "coverage": valid_parses / max(len(dataset.samples), 1),
+            "max_lhs_mass_error": max(abs(m - 1.0) for m in masses.tolist()),
         }
+

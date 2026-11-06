@@ -15,14 +15,33 @@ Upon **any structural, architectural, algorithmic, or interface change**, the AI
 
 ---
 
-## 2. Repository Hygiene Standards
+## 2. Mandatory Language Policy (English Only)
+
+**English is the only allowed language for every piece of prose in this repository.** This applies to:
+- Code comments, inline notes, and block comments.
+- Module, class, and function docstrings.
+- Console/log output, progress messages, `argparse` help text, gate labels, and the final verdict line.
+- Exception messages and assertion messages (including inside test files).
+- Test names, test docstrings, and helper prose in `tests/`.
+- All documentation: `README.md`, `doc/`, `AGENTS.md`, and comments inside `artifacts/`.
+- Commit messages and pull-request descriptions.
+
+Additional constraints:
+1. **ASCII only inside Python sources**: never introduce accented characters, smart quotes, or typographic dashes in `.py` files. Rephrase instead of using apostrophes.
+2. **Values are not prose**: keep technical identifiers, dictionary keys, status constants (`UNSAT`, `SAT`, `INCONCLUSIVE`, `INVALID`), CLI flags, and exported artifact filenames byte-identical when translating surrounding text.
+3. **Legacy text**: when editing a file that still contains non-English prose, translate that prose in the same change.
+4. **Legitimate exceptions**: formal-language data under study (bracket tokens `()`, `[]`), third-party library names, and the historical artifact filename `artifacts/DynamicGrammarIta.gf` (retained for compatibility; its contents must still be English).
+
+---
+
+## 3. Repository Hygiene Standards
 - **Zero bytecode cache**: Never commit `*.pyc` files, `*.egg-info/`, or `__pycache__/` directories.
 - All newly introduced dependencies must be recorded in `requirements.txt`, `pyproject.toml`, and documented in `README.md` and `doc/TECHNICAL_DOCUMENTATION.md`.
 - Always respect and maintain `.gitignore`.
 
 ---
 
-## 3. Mandatory Testing and Verification Protocol
+## 4. Mandatory Testing and Verification Protocol
 
 Before completing any change or submission, the AI agent **MUST** run the following verification steps:
 
