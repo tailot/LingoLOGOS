@@ -193,6 +193,98 @@ module, so it is importable and testable before any network exists.
   cross-entropy alone already operates on legal continuations. The mask is therefore the primary
   mechanism, and a soft penalty stays optional.
 
+### 1.8 `model.py` - The Network, Written From Scratch
+
+`model.py` is the whole neural side of the pure-model track: one `ModelConfig`, four layer classes and
+one `EncoderDecoderModel`. There is **no** `from_pretrained` call, no external weight, no tokenizer or
+embedding imported from a hub; the checkpoint metadata states `"external_weights": "none"` and the
+test suite asserts that an archive whose format name is not `lingologos-transformer-1` is refused.
+
+- **Geometry** (the specification, kept): 6 encoder blocks plus 6 decoder blocks, 8 heads of
+  $d_{head} = 64$, $d_{model} = 512$, $d_{ff} = 2048$, dropout 0.1, learned absolute positions capped
+  at 96 in both directions (measured maxima 68 encoder and 92 decoder protocol tokens, so nothing is
+  ever truncated). `ModelConfig.__post_init__` rejects a vocabulary smaller than 2, non-positive
+  widths or position budgets, $d_{model}$ not divisible by the head count, fewer than one layer on a
+  side, and dropout outside $[0, 1)$, raising `ModelError` rather than letting a shape error surface
+  300 lines later; `from_dict` refuses unknown or missing keys, so a checkpoint cannot quietly carry a
+  renamed hyperparameter.
+- **Blocks.** Pre-norm (LayerNorm before attention and before the feed-forward, residual after),
+  attention through `F.scaled_dot_product_attention` with the causal or padding mask passed as an
+  additive float mask and dropout applied only in training mode. The decoder block carries an optional
+  cross-attention sub-layer against the encoder memory.
+- **Embeddings.** Encoder and decoder keep **separate** token tables (the encoder reads free text, the
+  decoder emits the protocol alphabet), each scaled by $\sqrt{d_{model}}$, with `padding_idx` on the id
+  of `<PAD>` and that row pinned to zero. The decoder input table is tied to the output projection,
+  which saves exactly $V \cdot d_{model} = 2{,}007{,}552$ parameters. Total measured count:
+  **48,253,952** trainable parameters, from `parameter_breakdown`: encoder blocks 18,914,304, decoder
+  blocks 25,224,192, token tables 4,015,104, position tables 98,304, final layernorms 2,048.
+- **Initialization, per the specification and measured.** `apply_initialization(model, seed)` is
+  deterministic in the seed: LayerNorm gains 1 and biases 0; embeddings and position tables
+  $N(0, 0.02)$; every linear matrix gets Kaiming (He) if it is the ReLU-side inner projection of a
+  feed-forward block and Xavier otherwise, biases uniform in $\pm 1/\sqrt{fan_{in}}$; the projection is
+  re-tied afterwards. In PyTorch 2.14 the He branch applies the ReLU gain, so the measured bound is
+  $\sqrt{6/fan_{in}}$ (0.3062 at $fan_{in} = 64$) and not the smaller $\sqrt{5}$-adjusted bound; the
+  tests encode the measured distinction. `initialization_report` at the shipped configuration returns
+  100 matrices, standard deviation 0.044993, no non-finite parameter, matrix rows 96 to 3,921.
+- **Masks are shapes, not conventions.** `causal_mask(T)` is $[1,1,T,T]$ and `additive_padding_mask`
+  is $[B,1,1,S]$, both additive with $-\infty$; the tests assert those shapes and assert that the
+  decoder output at position $t$ does not change when a later position changes (causality checked in
+  `eval()` mode, where dropout cannot mask the effect).
+- **Persistence.** `save_model` writes a `torch.save` archive with the state dict, the config dict, the
+  initialization statistics, the mask and vocabulary reports, the hardware probe and the training
+  settings; `load_model` reads it with `weights_only=True` and refuses an archive from another track.
+  No new dependency was introduced for this (a `safetensors` switch was considered and rejected for
+  that reason).
+- **Tests**: `tests/test_model.py`, 20 checks (config guards, config round trip, forward shapes, budget
+  refusal, causality, mask shapes, invariance to encoder padding, zero `<PAD>` row, tying and the
+  untied variant, seed determinism of initialization, LayerNorm neutrality, the He versus Xavier
+  distinction, bias bounds, gradients on every parameter, the parameter breakdown identity, save and
+  load round trip with `torch.equal`, and refusal of a foreign archive).
+
+### 1.9 `training.py` - Masked Supervision, Schedules and Constrained Decoding
+
+`training.py` connects the corpus, the automaton and the network. It holds no hyperparameter policy of
+its own: the script `dataset/tools/train_model.py` owns the command line, this module owns the
+arithmetic.
+
+- **Examples and labels.** `AlgebraExample(identifier, source_text, symbols, language, domain,
+  logic_family)` is one supervised pair; `protocol_of` builds `<RULE_START> ... <EOS>`;
+  `label_allowed_sets` walks the automaton **once** per target and returns the admissible token set of
+  every predicted position, so a target of length $n$ yields $n-1$ labels, $n-1$ admissible-set rows
+  and the boolean `free` flag telling which of those positions had a real choice. On the shipped
+  corpus that share is **0.1966**: 80.3 percent of supervised positions are singletons the automaton
+  forces (spaces, the closing marker, `<EOS>`, the payload continuation of a leaf).
+- **Admissible sets as a table, not a loop.** `AllowedSetTable` interns every distinct admissible set
+  into an integer row (the corpus needs **13** rows: widest 136 tokens, narrowest 1, 8 single-choice
+  rows) and materializes one dense boolean matrix $[13, V]$ on the device. Batching gathers the rows
+  for the recorded states, so masking costs one `masked_fill_` over $[B, T, V]$ instead of $B \cdot T$
+  automaton calls. Padding writes `rule_start_row` and the start marker so a padded label never
+  receives an all-$-\infty$ row; `position_mask` removes those positions from the loss.
+- **The loss and its metrics.** `masked_logits` clones the logits and fills inadmissible entries with
+  $-\infty$, so cross-entropy is computed over legal alternatives only and perplexity is perplexity
+  over those alternatives. `score_batch` reports loss, perplexity, exact target-sequence accuracy
+  computed on the **masked** argmax, free-position accuracy, the count of generated sequences, and
+  `illegal_unmasked_argmax_rate`: how often the raw, unmasked argmax falls outside the admissible set.
+  The last number is not a bug report but a measurement of the division of labour: at convergence the
+  model scores an inadmissible token highest at 83.4 percent of positions while its masked accuracy is
+  99.9 percent, because masked cross-entropy never penalizes an inadmissible logit.
+- **Optimization.** `build_optimizer` is AdamW with $\beta_1 = 0.9$, $\beta_2 = 0.98$,
+  $\epsilon = 10^{-9}$, weight decay 0.01 on weight matrices and zero on biases and layernorm gains
+  (two parameter groups, asserted by the tests). `cosine_schedule` is a `LambdaLR` that ramps linearly
+  over the warmup steps and then decays to `final_fraction` of the peak rate; a warmup longer than the
+  total is repaired rather than producing a zero learning rate.
+- **Constrained decoding.** `generate_batch` decodes a whole batch under the automaton: each row keeps
+  its own prefix, the position of the next symbol is `len(prefix) - 1`, the encoder memory is gathered
+  by the active rows, and every emitted token is drawn from the admissible ids of that row's state, so
+  an illegal continuation is unreachable rather than improbable. Greedy and temperature sampling are
+  both seeded; `max_steps` is checked against the decoder position budget instead of silently
+  truncating.
+- **Tests**: `tests/test_training.py`, 19 checks, including a **non-vacuous** overfit: 12 sentence and
+  stream pairs trained for 130 epochs (390 updates) reach loss below 0.05, exact-sequence accuracy 1.0,
+  and greedy constrained decoding reproduces all 12 streams byte for byte. Legality of generated
+  prefixes is re-checked with `AlgebraMask.replay` on untrained weights, and every corrupted stream is
+  refused by `validate_stream`.
+
 ---
 
 ## 2. Step-by-Step Configuration and Training Guide
@@ -255,7 +347,9 @@ The repository includes `.github/workflows/ci.yml` running pytest and the synthe
 
 Corpus and tools are versioned in this repository. The packaged files are published as GitHub Release assets under incrementing tags: the first release is `dataset-v1`, the next ones continue as `dataset-v2`, `dataset-v3` and so on (`https://github.com/tailot/LingoLOGOS/releases/latest` always points at the newest). A release carries `lingologos-dataset.zip` (data, chat pairs, corpus, configs, templates, tools), `grammar.json`, `grammar.yaml`, `DatasetGrammar.gf`, `grammar-metrics.json`, `tokenizer.json`, `tokenizer-metrics.json`, `masking-metrics.json` and `dataset-stats.json`. The files are free to download. `.github/workflows/dataset.yml` produces them in three stages: consistency check plus tokenizer and mask gates, grammar induction, and the release itself.
 
-The learning and checking entry points of that folder, all thin wrappers over the modules documented above and all model-free:
+The learning and checking entry points of that folder, all thin wrappers over the modules documented
+above. The first four are model-free, the last three build and run the pure network of sections 1.8
+and 1.9:
 
 | entry point | role |
 | --- | --- |
@@ -263,8 +357,16 @@ The learning and checking entry points of that folder, all thin wrappers over th
 | `dataset/tools/train_grammar.py` | induces the PCFG over the corpus of the dataset with `DifferentiableCYKParser`, `GrammarTrainer`, `PCFGrammar` and `GrammarVerifier` |
 | `dataset/tools/train_tokenizer.py` | learns the byte-pair vocabulary of section 1.6 from the training split only, derives the protected alphabet from the operator registry, and runs gates `T1`-`T5` on all three splits |
 | `dataset/tools/verify_masking.py` | builds the automaton of section 1.7 from the registry plus the training split, and runs gates `M1`-`M5` against an independent oracle, including the negative controls and the token-level protocol check |
+| `dataset/tools/model_data.py` | shared loader: tokenizer, algebra mask, token mask, examples per split, length profile and hardware probe, so training and evaluation cannot drift apart |
+| `dataset/tools/train_model.py` | the training loop of section 1.9 on the real corpus: AdamW with one epoch of warmup and cosine decay, bf16 autocast, masked cross-entropy, per-epoch validation, constrained decoding slice, checkpoints under the git-ignored `dataset/checkpoints/model/` |
+| `dataset/tools/evaluate_model.py` | gates `E1`, `E2`, `E3`, `E5` on a held-out split: exact-tree accuracy with the per-language, per-domain and per-family breakdown, legality through the independent oracle, the registry plus Z3 audit of the trees the model produced, the invented-number audit, and the mask-ablation pass at identical weights |
 
-There is no chat fine-tuning stage and no third-party model in this repository: the assistant that answers in natural language is the pure model described in `doc/PURE_MODEL_ROADMAP.md`, whose tokenizer and mask are already trained here, and whose network and training loop are the remaining phases of that roadmap. Sizing notes for consumer cards, the measured saturation of the vocabulary and the full flag documentation are in `dataset/TRAINING.md` and in section 11 of `README.md`.
+There is no chat fine-tuning stage and no third-party model in this repository: the assistant that
+answers in natural language is the pure model described in `doc/PURE_MODEL_ROADMAP.md`. Phases 1 to 4
+of that roadmap are measured, phase 5 is the evaluation script above, and the verbalization direction
+is specified but not trained. Sizing notes for consumer cards, the measured saturation of the
+vocabulary, the measured cost of a 20-epoch run and the full flag documentation are in
+`dataset/TRAINING.md` and in section 11 of `README.md`.
 
 ---
 

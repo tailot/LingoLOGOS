@@ -211,6 +211,8 @@ documentation cannot drift away from the code). Its contract:
 │       ├── reference.py           # Gold Dyck-2 CNF, gold prior init, negative controls, gold rule F1
 │       ├── tokenizer.py           # Byte-pair vocabulary trained from scratch, protected formal alphabet
 │       ├── masking.py             # Symbolic decoding mask: prefix automaton plus token-level logits mask
+│       ├── model.py               # Encoder-decoder transformer from scratch: config, layers, init, save and load
+│       ├── training.py            # Masked supervision, AdamW plus cosine schedule, constrained batch decoding
 │       ├── verification.py        # GrammarVerifier (Lark, coverage, negative controls, Z3 inclusion)
 │       └── synthesize.py          # End-to-end synthesis, verification gates and export pipeline
 ├── tests/
@@ -220,6 +222,9 @@ documentation cannot drift away from the code). Its contract:
 │   ├── test_reference.py          # Gold CNF, negative controls, gold rule F1 sanity
 │   ├── test_tokenizer.py          # Lossless pre-tokenization, protected atoms, one token per symbol
 │   ├── test_masking.py            # Legal language, refused mutations, logits mask, protocol markers
+│   ├── test_model.py              # Config guards, causality, embedding tying, initialization schema, save and load
+│   ├── test_training.py           # Admissible-set table, masked CE, schedules, constrained overfit proof
+│   ├── test_evaluation_tools.py   # Gate arithmetic of the checkpoint evaluator (accuracy and audits)
 │   └── test_verification.py       # Z3 certificate (UNSAT) and refutation of over-generating grammars
 ├── AGENTS.md                      # Mandatory instructions for AI agents
 ├── pyproject.toml                 # Build metadata, packaging, and pytest configuration
@@ -228,8 +233,10 @@ documentation cannot drift away from the code). Its contract:
 ```
 
 The companion `dataset/` folder (corpus, chat pairs, Dyck-2 corpus, templates, and the tools that
-validate it, learn its vocabulary and check its decoding mask) is documented in section 11 and in
-`dataset/README.md`.
+validate it, learn its vocabulary, check its decoding mask and train the pure network on it) is
+documented in section 11 and in `dataset/README.md`. The learned tokenizer, the model checkpoints and
+the evaluation reports live under `dataset/checkpoints/`, which is git-ignored: the repository carries
+the code and the data that rebuild them, not the weights.
 
 ---
 
@@ -460,12 +467,57 @@ renderings, and the other three (semantic pattern, GF abstraction, SMT assertion
 deterministically from that tree by `dataset/tools/logic_map.py`, so the model never has to
 generate JSON or SMT text: one object to learn, three guaranteed views of it.
 
-### Phases 3 to 5 -- not built yet
+### Phases 3 to 5 -- built and measured
 
-The network (6 encoder plus 6 decoder layers, 8 heads, `d_model` 512, `d_ff` 2048, dropout 0.1,
-stochastic initialization), its training loop with the masked cross-entropy, and the Z3 benchmark of
-generated answers are still to be written. `doc/PURE_MODEL_ROADMAP.md` holds the design, the
-hyperparameters, the phase-by-phase plan and the corrections listed below.
+The network is `src/neuro_symbolic/model.py`: 6 encoder plus 6 decoder blocks, 8 heads, `d_model` 512,
+`d_ff` 2048, dropout 0.1, learned absolute positions, 48,253,952 parameters, initialization exactly as
+specified (LayerNorm 1/0, embeddings N(0, 0.02), Kaiming on the ReLU side of the feed-forward blocks,
+Xavier elsewhere, uniform biases). The training loop is `src/neuro_symbolic/training.py` driven by
+`dataset/tools/train_model.py`, and the held-out evaluation is `dataset/tools/evaluate_model.py`.
+
+```powershell
+python dataset/tools/train_model.py --epochs 20 --batch-size 64 --lr 5e-4 --warmup-steps 0 --amp auto
+python dataset/tools/evaluate_model.py --checkpoint dataset/checkpoints/model/model_best.pt --split test --min-exact-tree-accuracy 0.90
+```
+
+Ledger of the real 20-epoch run on the 12,140 training pairs (seed 17, batch 64, bf16, 3,800 updates,
+809 seconds, peak 2.47 GB): masked cross-entropy 0.3666 to 0.00025, perplexity 1.44 to 1.000,
+free-position accuracy 0.555 to 0.9993, and greedy constrained decoding of the algebra from 12.5 to
+93.8 percent of a held-out slice. Only 19.66 percent of the supervised positions are real choices: the
+automaton forces the other 80 percent to a single token, and the free-position figure is measured over
+the hard fifth only.
+
+Evaluation of the best checkpoint on the 675 rows of the **test** split, gates printed by the tool:
+
+| gate | result |
+| :--- | :--- |
+| `E1` exact tree, held out | **0.9393** (threshold 0.90), bracket skeleton 1.0000, truncated 0 |
+| `E1` by language | de 0.933, en 0.948, es 0.941, fr 0.933, it 0.941 -- 135 rows each |
+| `E1` by logic family | recurrence 1.000, frequency 1.000, conditional 0.957, **threshold 0.835** |
+| `E1` by domain | agenda 1.000, produttivita 1.000, finanze 0.965, salute 0.907, domotica 0.852 |
+| `E2` legality of generated streams | **675 / 675** against the independent oracle |
+| `E3` formal audit of generated trees | 675 built in Z3, 0 registry rejections, 0 build errors, **675 contingent, 0 satisfiable, 0 valid** |
+| `E3` invented-number audit | 5 payloads absent from the input sentence, 0.74 percent |
+| `E5` ablation, same weights | legality with mask 1.0000, **legality without mask 0.0000** |
+
+The table reports the checkpoint with the best validation loss (epoch 11). The final epoch-20 weights do
+better on the gate metric itself, **0.9511 exact tree (642 of 675)**, because validation loss averages
+the 80 percent of positions the automaton forces and is a weak proxy for exact-tree accuracy; both
+reports and both sets of numbers are in `dataset/checkpoints/evaluation/` and in section 7 of
+`doc/PURE_MODEL_ROADMAP.md`.
+
+`E5` is the sharpest number in the table: with the mask switched off at inference time, at identical
+weights, the raw decoder never reaches `<RULE_END>` and degenerates into repeated tokens (`WEEKDAY_ORD
+WEEKDAY_ORD ord ord ...`), and its unmasked argmax sits outside the admissible set at 83.6 percent of
+the positions even though its masked accuracy is 99.3 percent. Masked cross-entropy never penalizes an
+inadmissible logit, it only refuses to reward it: well-formedness is a property of the constraint, not
+of the weights, and that is what the specification asks for.
+
+The failure modes that remain are specific and honest: errors concentrate in the `threshold` family
+(0.835 over 200 rows) and in `domotica` (0.852 over 155 rows), the generated bracket skeleton is always
+correct, and 5 of 675 rows carry a numeric payload the input sentence never stated. Phase 5 of the
+roadmap is that script, and the phase-4 verbalization direction (tree back to a sentence) is still
+specified but not trained.
 
 ### Corrections to the specification, measured rather than assumed
 
@@ -473,9 +525,9 @@ hyperparameters, the phase-by-phase plan and the corrections listed below.
 | :--- | :--- |
 | vocabulary `V` of 8,000 to 32,000 | the byte-pair vocabulary **saturates at 3,921** (1,578 word types, 3,040,076 atomic units): any target above that is unreachable, so `V = 3,921` is the number to size the embedding on |
 | warmup of 4,000 steps | one epoch over the 12,140 training pairs is 95 steps at batch 128, so 4,000 steps of warmup would be about 42 epochs of warmup; warmup has to be a fraction of an epoch, not a fixed 4,000 |
-| cosine decay of the learning rate | planned as documented; the grammar trainer in this repository anneals linearly with a temperature schedule, and the pure model loop will state its schedule explicitly instead |
-| loss `L = L_CE + lambda * L_Symbolic` with `lambda = 0.1` | with the hard mask of phase 2 the invalid region already has zero probability mass, so the penalty term is redundant: keep it as an optional ablation, not as the mechanism that enforces legality |
-| minimum hardware: RTX 3090 or A100, 16 GB | the development machine has an RTX 5070 Ti with 16,303 MiB and PyTorch 2.14.1+cu130 with CUDA available, which matches the 16 GB budget; the phase 3 network is about 48 million parameters (6 encoder plus 6 decoder layers at `d_model` 512), so weights, gradients and AdamW states are well under 1 GB and memory is not the constraint |
+| cosine decay of the learning rate | implemented as declared in `training.py`: linear warmup over one epoch (190 steps at batch 64), then cosine down to 10 percent of the peak rate; the grammar trainer in this repository anneals temperature linearly, so the pure model loop declares its own schedule instead of inheriting a convention |
+| loss `L = L_CE + lambda * L_Symbolic` with `lambda = 0.1` | with the hard mask of phase 2 the invalid region already has zero probability mass, so the penalty term is redundant: keep it as an optional ablation, not as the mechanism that enforces legality. Measured as gate `E5`: legality 1.0000 with the mask, 0.0000 without it, at identical weights |
+| minimum hardware: RTX 3090 or A100, 16 GB | the development machine has an RTX 5070 Ti with 16,303 MiB and PyTorch 2.14.1+cu130 with CUDA available, which matches the 16 GB budget. Measured at `d_model` 512 and 48,253,952 parameters: 20 epochs over 12,140 pairs in 809 seconds at batch 64 with bf16 autocast, peak process memory 2,467,995,648 bytes, 341 samples per second. Memory is not the constraint; data volume is |
 
 ### Attaching artifacts to a GitHub release
 
@@ -483,3 +535,18 @@ hyperparameters, the phase-by-phase plan and the corrections listed below.
 Compress-Archive -Path dataset\checkpoints\tokenizer\* -DestinationPath dist\tokenizer.zip
 gh release upload dataset-v1 dist\tokenizer.zip --clobber
 ```
+
+The same route fits the model checkpoint: measured 201,112,479 bytes for `model.pt` and 201,130,518 for
+`model_best.pt` (192 MiB each, consistent with 48,253,952 parameters in float32 plus the optimizer state
+and the metadata). A workflow artifact of that size is possible but expires after 90 days and is not a
+public download, while a release asset is permanent, public and allowed up to 2 GiB per file:
+
+```powershell
+git tag model-v1
+git push origin model-v1
+gh release upload model-v1 dataset\checkpoints\model\model_best.pt --clobber
+```
+
+Training itself stays off hosted runners: they have no GPU, the 20-epoch run is an 809-second CUDA job
+here, and a verification job only needs to run `dataset/tools/evaluate_model.py`, which exits with code 1
+when any gate fails and writes the per-gate `passed` flags into its report.

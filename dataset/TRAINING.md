@@ -145,16 +145,88 @@ of the 53 registered operators never occurs in the corpus, so its arity is never
 `--samples`, `--max-depth`, `--max-symbols`, `--seed`, `--list-only` and `--lenient` control
 the run.
 
-## 5. Phases 3 to 5: not implemented yet
+## 5. Phase 3: the network
 
-The network (6 encoder plus 6 decoder layers, 8 heads, `d_model` 512, `d_ff` 2048, dropout
-0.1, stochastic initialization, no pretrained weights), the training loop with masked
-cross-entropy, and the Z3 benchmark of generated answers are still to be written. Design,
-hyperparameters and the phase plan are in `doc/PURE_MODEL_ROADMAP.md`, together with the
-corrections to the original specification (vocabulary saturation, warmup length, scheduler,
-and the redundancy of the soft symbolic penalty once the hard mask is in place).
+The network lives in `src/neuro_symbolic/model.py` and the training machinery in
+`src/neuro_symbolic/training.py`; both are pure PyTorch, with no pretrained weight, no hub download and
+no third-party tokenizer. The checkpoint metadata states `"external_weights": "none"`, and `load_model`
+refuses an archive whose format name is not `lingologos-transformer-1`.
 
-## 6. Regenerating or extending the dataset
+| item | value |
+| --- | --- |
+| blocks | 6 encoder plus 6 decoder, pre-norm, 8 heads of 64 |
+| width | `d_model` 512, `d_ff` 2048, dropout 0.1 |
+| positions | learned absolute, budget 96 per side (measured need: 68 encoder, 92 decoder protocol tokens) |
+| parameters | 48,253,952 trainable: encoder blocks 18,914,304, decoder blocks 25,224,192, token tables 4,015,104, position tables 98,304, final norms 2,048 |
+| initialization | LayerNorm gains 1 / biases 0, embeddings and positions N(0, 0.02), Kaiming on the ReLU side of each feed-forward block, Xavier elsewhere, uniform biases, decoder input tied to the output projection |
+
+`python -m pytest -v tests/test_model.py` runs the 20 checks that pin this down (config guards,
+causality, additive mask shapes, invariance to encoder padding, zero `<PAD>` row, weight tying, seed
+determinism of the initialization, the He versus Xavier bound, save and load round trip).
+
+## 6. Phase 4: training the pure model
+
+```powershell
+python dataset/tools/train_model.py --epochs 20 --batch-size 64 --lr 5e-4 --warmup-steps 0 --amp auto
+```
+
+The loop trains on the 12,140 pairs of the training split only, with cross-entropy computed over the
+admissible tokens of each position: the admissible sets are interned into a table (13 distinct rows over
+the whole corpus, widest 136 tokens, narrowest 1), materialized once as a dense boolean matrix on the
+device and gathered per batch, so masking costs one `masked_fill_` instead of one automaton call per
+token. AdamW with beta 0.9 and 0.98, epsilon 1e-9, weight decay 0.01 on weight matrices only, gradient
+clipping at 1.0, warmup of one epoch (190 steps at batch 64, since 4,000 steps of warmup would be 21
+epochs here) and cosine decay to 10 percent of the peak rate.
+
+Measured, 20 epochs, seed 17, bf16, 809 seconds on the RTX 5070 Ti:
+
+| quantity | epoch 1 | epoch 20 |
+| --- | --- | --- |
+| masked cross-entropy (train) | 0.3666 | 0.000246 |
+| perplexity over admissible alternatives | 1.44 | 1.00025 |
+| free-position accuracy | 0.555 | 0.99931 |
+| exact target sequence, teacher forced | 0.021 | 0.99333 |
+| validation loss | 0.1112 | 0.00558, best 0.00404 at epoch 11 |
+| greedy constrained decoding, 16 validation sentences | 0.125 | 0.9375 |
+| throughput and peak memory | -- | 340.6 samples/s, 2,467,995,648 bytes |
+
+Only 19.66 percent of supervised positions are real choices: the automaton forces the other 80 percent
+to a single token (the space between symbols, the closing marker, `<EOS>`, the leaf payload
+continuation), so the free-position figure is measured over the hard fifth of the sequence. Artifacts
+land in `dataset/checkpoints/model/`: `model.pt`, `model_best.pt`, `model_config.json`, `history.json`
+and `train_metrics.json`. Useful flags: `--limit`, `--device cpu`, `--amp off`, `--epochs`,
+`--warmup-steps`, `--eval-every`, `--generation-samples`, `--out-dir`, `--dry-run`.
+
+## 7. Phase 5: held-out gates and the Z3 audit
+
+```powershell
+python dataset/tools/evaluate_model.py --checkpoint dataset/checkpoints/model/model_best.pt --split test --min-exact-tree-accuracy 0.90
+```
+
+The tool decodes the whole split under the mask, then reports four gates and writes a JSON report with
+the per-gate `passed` flags and a `final_verdict` (exit code 1 on failure, so it can gate a pipeline):
+
+| gate | `model_best.pt` (epoch 11) | `model.pt` (epoch 20) |
+| --- | --- | --- |
+| E1 exact tree on 675 test rows | 0.9393 | **0.9511** |
+| E1 bracket skeleton, truncations | 1.0000, 0 | 1.0000, 0 |
+| E2 streams accepted by the independent oracle | 675 / 675 | 675 / 675 |
+| E3 rebuilt in Z3: contingent, unsatisfiable, valid, build errors | 675, 0, 0, 0 | 675, 0, 0, 0 |
+| E3 numbers absent from the input sentence | 5 (0.0074) | 7 (0.0104) |
+| E5 legality with mask versus without | 1.0000 versus 0.0000 | 1.0000 versus 0.0000 |
+
+The mistakes are labelling mistakes, not structural ones: the bracket skeleton is always right, and the
+error concentrates in the `threshold` logic family (0.845 over 200 rows) and in the `domotica` and
+`salute` domains, while `recurrence`, `frequency` and `agenda` are perfect. Language is not the problem
+(0.941 to 0.956 across the five). Without the mask, at identical weights, no stream reaches the closing
+marker and the decoder repeats symbols until the step budget expires; its raw argmax is outside the
+admissible set at 83.6 percent of the teacher-forced positions. That is the measurement of what the
+symbolic constraint contributes. Reports: `dataset/checkpoints/evaluation/<checkpoint>-<split>.json`.
+Flags: `--split`, `--limit`, `--batch-size`, `--sampling --temperature`, `--no-z3`, `--no-ablation`,
+`--no-refine`, `--min-exact-tree-accuracy`, `--max-invented-number-rate`, `--max-noncontingent-rate`,
+`--out`. Gate E4 (verbalization, tree back to sentence) is not trained and therefore not reported.
+
+## 8. Regenerating or extending the dataset
 
 The items are produced from the 50 templates and the multilingual lexicon:
 
@@ -169,7 +241,7 @@ the lexicon, that the bracket words stay balanced and that the SMT translation b
 After a regeneration, rerun the tokenizer and the mask gates: both learn their alphabet
 and their leaf shapes from the corpus, so a new domain has to relearn them.
 
-## 7. The pipeline in GitHub Actions
+## 9. The pipeline in GitHub Actions
 
 The folder has its own pipeline, `.github/workflows/dataset.yml`, kept separate
 from the CI of the engine. It runs on every push that touches `dataset/**` and it
@@ -197,6 +269,21 @@ templates, configurations, tools and the two documents), `grammar.json`,
 pipeline induced, with gates G1 to G4), `tokenizer.json` and `tokenizer-metrics.json`
 (the vocabulary learned from the corpus, with gates T1 to T5), `masking-metrics.json`
 (the symbolic decoding gates M1 to M5) and `dataset-stats.json`.
+
+Model weights are deliberately not part of that pipeline. Hosted runners have no GPU and a six-hour
+limit, the training of section 6 is an 809-second GPU job on this machine, and `upload-artifact` caps an
+artifact near 500 MB with a 90-day expiry while a release asset allows 2 GiB per file. The checkpoint is
+built locally, and publishing it means attaching it to a release rather than to a workflow run:
+
+```powershell
+git tag model-v1
+git push origin model-v1
+gh release upload model-v1 dataset/checkpoints/model/model_best.pt --clobber
+```
+
+A verification job can then run the gates of section 7 before publishing, because
+`dataset/tools/evaluate_model.py` exits with code 1 when any gate fails and writes the per-gate `passed`
+flags into its JSON report.
 
 Everything the pipeline runs fits on a CPU runner. `dataset/checkpoints/` stays out of
 git, and no stage of the pipeline contacts an external hub or downloads a model.
