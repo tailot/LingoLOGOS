@@ -45,7 +45,10 @@ from .model import (
     initialization_report,
     load_model,
     load_model_metadata,
+    load_model_safetensors,
+    read_model_safetensors_header,
     save_model,
+    save_model_safetensors,
 )
 from .training import (
     AlgebraExample,
@@ -105,7 +108,10 @@ __all__ = [
     "initialization_report",
     "load_model",
     "load_model_metadata",
+    "load_model_safetensors",
+    "read_model_safetensors_header",
     "save_model",
+    "save_model_safetensors",
     "AlgebraExample",
     "AllowedSetTable",
     "Batch",

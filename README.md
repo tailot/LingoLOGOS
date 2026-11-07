@@ -211,7 +211,7 @@ documentation cannot drift away from the code). Its contract:
 │       ├── reference.py           # Gold Dyck-2 CNF, gold prior init, negative controls, gold rule F1
 │       ├── tokenizer.py           # Byte-pair vocabulary trained from scratch, protected formal alphabet
 │       ├── masking.py             # Symbolic decoding mask: prefix automaton plus token-level logits mask
-│       ├── model.py               # Encoder-decoder transformer from scratch: config, layers, init, save and load
+│       ├── model.py               # Encoder-decoder transformer from scratch: config, layers, init, torch and safetensors persistence
 │       ├── training.py            # Masked supervision, AdamW plus cosine schedule, constrained batch decoding
 │       ├── verification.py        # GrammarVerifier (Lark, coverage, negative controls, Z3 inclusion)
 │       └── synthesize.py          # End-to-end synthesis, verification gates and export pipeline
@@ -225,6 +225,7 @@ documentation cannot drift away from the code). Its contract:
 │   ├── test_model.py              # Config guards, causality, embedding tying, initialization schema, save and load
 │   ├── test_training.py           # Admissible-set table, masked CE, schedules, constrained overfit proof
 │   ├── test_evaluation_tools.py   # Gate arithmetic of the checkpoint evaluator (accuracy and audits)
+│   ├── test_hub_package.py        # safetensors round trip, mask specification, gate refusal, release folder
 │   └── test_verification.py       # Z3 certificate (UNSAT) and refutation of over-generating grammars
 ├── AGENTS.md                      # Mandatory instructions for AI agents
 ├── pyproject.toml                 # Build metadata, packaging, and pytest configuration
@@ -233,10 +234,12 @@ documentation cannot drift away from the code). Its contract:
 ```
 
 The companion `dataset/` folder (corpus, chat pairs, Dyck-2 corpus, templates, and the tools that
-validate it, learn its vocabulary, check its decoding mask and train the pure network on it) is
-documented in section 11 and in `dataset/README.md`. The learned tokenizer, the model checkpoints and
-the evaluation reports live under `dataset/checkpoints/`, which is git-ignored: the repository carries
-the code and the data that rebuild them, not the weights.
+validate it, learn its vocabulary, check its decoding mask, train the pure network on it and package the
+result for publication) is documented in section 11 and in `dataset/README.md`. The learned tokenizer,
+the model checkpoints and the evaluation reports live under `dataset/checkpoints/`, which is git-ignored:
+the repository carries the code and the data that rebuild them, not the weights. The trained weights of
+the pure model are published as `model.safetensors` on the Hugging Face Hub, and section 11 gives the
+command that builds and uploads that release.
 
 ---
 
@@ -299,12 +302,15 @@ $$A \to a:\ \delta = e(a),\ m = e(a) \qquad A \to B\,C:\ \delta = \delta_B + \de
 - Z3 Solver (`z3-solver`)
 - Lark (`lark`)
 - PyYAML (`pyyaml`)
+- NumPy (`numpy`)
+- Safetensors (`safetensors`), the release format of the pure-model weights
 - pytest (`pytest`)
 
 Install dependencies:
 ```bash
 pip install -r requirements.txt
 pip install -e .
+pip install -e ".[publish]"   # only needed to upload a release, adds huggingface_hub
 ```
 
 ### End-to-End Synthesis and Artifact Export
@@ -361,9 +367,9 @@ Italian, English, French, Spanish and German: 13,490 phrases, 2,698 distinct mea
 meaning written as a balanced word over `( ) [ ]`, which is the alphabet this engine induces.
 
 The assistant trained on it is a **pure model**: no pretrained checkpoint, no external
-vocabulary, no third-party weights anywhere in this repository. Phases 1 and 2 of that track
-are implemented and gated, phases 3 to 5 are specified and not built yet, and the whole plan
-with its measured corrections is `doc/PURE_MODEL_ROADMAP.md`.
+vocabulary, no third-party weights anywhere in this repository. Phases 1 to 5 of that track
+are implemented and measured, the verbalization direction of phase 4 is specified but not trained, and
+the whole plan with its measured corrections is `doc/PURE_MODEL_ROADMAP.md`.
 
 ### Downloading the dataset
 
@@ -529,17 +535,50 @@ specified but not trained.
 | loss `L = L_CE + lambda * L_Symbolic` with `lambda = 0.1` | with the hard mask of phase 2 the invalid region already has zero probability mass, so the penalty term is redundant: keep it as an optional ablation, not as the mechanism that enforces legality. Measured as gate `E5`: legality 1.0000 with the mask, 0.0000 without it, at identical weights |
 | minimum hardware: RTX 3090 or A100, 16 GB | the development machine has an RTX 5070 Ti with 16,303 MiB and PyTorch 2.14.1+cu130 with CUDA available, which matches the 16 GB budget. Measured at `d_model` 512 and 48,253,952 parameters: 20 epochs over 12,140 pairs in 809 seconds at batch 64 with bf16 autocast, peak process memory 2,467,995,648 bytes, 341 samples per second. Memory is not the constraint; data volume is |
 
-### Attaching artifacts to a GitHub release
+### Attaching dataset artifacts to a GitHub release
 
 ```powershell
 Compress-Archive -Path dataset\checkpoints\tokenizer\* -DestinationPath dist\tokenizer.zip
 gh release upload dataset-v1 dist\tokenizer.zip --clobber
 ```
 
-The same route fits the model checkpoint: measured 201,112,479 bytes for `model.pt` and 201,130,518 for
-`model_best.pt` (192 MiB each, consistent with 48,253,952 parameters in float32 plus the optimizer state
-and the metadata). A workflow artifact of that size is possible but expires after 90 days and is not a
-public download, while a release asset is permanent, public and allowed up to 2 GiB per file:
+### Publishing the weights as safetensors
+
+The published weights are **`model.safetensors`**, not a pickle. `save_model_safetensors` in
+`src/neuro_symbolic/model.py` hands the whole module to `safetensors.torch.save_model`, so the tied
+output projection is stored **once**: 260 tensor entries for the 261 names `state_dict` declares,
+193,044,672 bytes for 48,253,952 distinct parameters. The file header carries the format tag
+`lingologos-transformer-1`, the configuration as JSON, the padding id and the provenance block, and
+`load_model_safetensors` rebuilds the architecture from that header and loads with `strict=True`, which
+re-establishes the tie.
+
+`dataset/tools/publish_to_hub.py` assembles the release folder and, with `--upload`, pushes it to the
+Hugging Face Hub:
+
+```powershell
+python dataset/tools/publish_to_hub.py --checkpoint dataset/checkpoints/model/model_best.pt --report dataset/checkpoints/evaluation/model_best-test.json --out-dir dataset/checkpoints/hub --repo tailot/lingologos-pure-1
+$env:HF_TOKEN = "..."    # the token is read from the environment, never passed as an argument
+python dataset/tools/publish_to_hub.py --checkpoint dataset/checkpoints/model/model_best.pt --report dataset/checkpoints/evaluation/model_best-test.json --out-dir dataset/checkpoints/hub --repo tailot/lingologos-pure-1 --upload
+```
+
+The folder holds seven files: `model.safetensors`, `config.json`, `tokenizer.json`, `mask_spec.json`,
+`metadata.json`, `evaluation_report.json` and the model card `README.md`. `mask_spec.json` counts as much
+as the weights: a downloaded model without the operator arities, the leaf forms and the observed child
+kinds cannot be driven as a constrained generator, so `AlgebraMask.to_spec` and `AlgebraMask.from_spec`
+make the symbolic constraint part of the release. The tool refuses a checkpoint whose gate report is not
+`PASS`, reloads the file it has just written and requires a bit-identical round trip (261 tensors
+compared, largest logit difference 0.0 on a fixed probe batch) before anything leaves the machine, and
+records the sha256 of every artifact in `metadata.json`.
+
+The model card repeats the gate table as printed by `dataset/tools/evaluate_model.py`, the breakdown by
+language, domain and logic family, the `E5` mask ablation, and what the model does not do: no
+verbalization direction back to a sentence, no chat ability, and a license line because the source
+repository declares none.
+
+The raw `torch.save` checkpoint stays available as a GitHub release asset for anyone who wants the
+optimizer state: measured 201,112,479 bytes for `model.pt` and 201,130,518 for `model_best.pt`, within
+the 2 GiB per-file limit of a release asset, while a workflow artifact of that size would expire after
+90 days and is not a public download.
 
 ```powershell
 git tag model-v1

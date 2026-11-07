@@ -187,6 +187,12 @@ module, so it is importable and testable before any network exists.
   `--refine` the extra restriction "which child kind sits at which position" is learned from the
   training split only (83 refined `(operator, position)` pairs) and the held-out split is still fully
   accepted, so the refinement is sound and not over-fitted to the test data.
+- **The constraint is portable.** `to_spec()` serializes the automaton: operator arities, the leaf forms
+  with their payload token ids, the leaf tag tokens, the observed child kinds keyed `NAME <position>`,
+  and the leaf length bound. `AlgebraMask.from_spec` rebuilds an identical automaton from that JSON and
+  refuses a specification that is missing a key or that carries a malformed child-kind key, so
+  `mask_spec.json` in a release reconstructs the same mask, token ids included, without the templates
+  and without the corpus.
 - **Consequence for the loss.** With the hard mask in place during both training and inference, the
   symbolic term $\lambda L_{\mathrm{Symbolic}}$ of the specification becomes redundant rather than
   wrong: the invalid region of the output space has zero probability mass by construction, so the
@@ -230,11 +236,22 @@ test suite asserts that an archive whose format name is not `lingologos-transfor
   is $[B,1,1,S]$, both additive with $-\infty$; the tests assert those shapes and assert that the
   decoder output at position $t$ does not change when a later position changes (causality checked in
   `eval()` mode, where dropout cannot mask the effect).
-- **Persistence.** `save_model` writes a `torch.save` archive with the state dict, the config dict, the
-  initialization statistics, the mask and vocabulary reports, the hardware probe and the training
-  settings; `load_model` reads it with `weights_only=True` and refuses an archive from another track.
-  No new dependency was introduced for this (a `safetensors` switch was considered and rejected for
-  that reason).
+- **Persistence for training.** `save_model` writes a `torch.save` archive with the state dict, the
+  config dict, the initialization statistics, the mask and vocabulary reports, the hardware probe and
+  the training settings; `load_model` reads it with `weights_only=True` and refuses an archive from
+  another track. That archive remains the internal working format, because it also carries the optimizer
+  state a resumed run needs.
+- **Persistence for release: `safetensors`.** Published weights ship as `model.safetensors`, written by
+  `save_model_safetensors`. It hands the whole `nn.Module` to `safetensors.torch.save_model`, so a tied
+  tensor is stored **once**: at the shipped configuration the file holds 260 tensor entries for the 261
+  names declared by `state_dict`, and the write path raises when the file does not contain exactly as
+  many tensors as the model has distinct storages. The header carries four string fields: the format tag
+  `lingologos-transformer-1`, the configuration as JSON, the padding id, and caller metadata.
+  `load_model_safetensors` reads that header, rebuilds the architecture, and loads with `strict=True`,
+  which re-establishes the tie; `read_model_safetensors_header` exposes the header without the weights
+  and rejects a file whose tag is not this track or that has no configuration. Measured: 193,044,672
+  bytes for 48,253,952 distinct parameters, and a reload that reproduces every tensor and every logit of
+  a fixed probe batch exactly.
 - **Tests**: `tests/test_model.py`, 20 checks (config guards, config round trip, forward shapes, budget
   refusal, causality, mask shapes, invariance to encoder padding, zero `<PAD>` row, tying and the
   untied variant, seed determinism of initialization, LayerNorm neutrality, the He versus Xavier
@@ -297,7 +314,11 @@ arithmetic.
   - `lark >= 1.2.0`
   - `pyyaml >= 6.0`
   - `numpy >= 1.24.0`
+  - `safetensors >= 0.4.0` - release format of the pure-model weights, section 1.8
   - `pytest >= 8.0.0`
+- Optional, used only when publishing: `huggingface_hub >= 0.23.0`, installed with
+  `pip install -e ".[publish]"`. `dataset/tools/publish_to_hub.py` imports it inside the upload step and
+  nowhere else, so building a release folder needs no Hub package and no network access.
 
 Installation:
 ```bash
@@ -348,8 +369,8 @@ The repository includes `.github/workflows/ci.yml` running pytest and the synthe
 Corpus and tools are versioned in this repository. The packaged files are published as GitHub Release assets under incrementing tags: the first release is `dataset-v1`, the next ones continue as `dataset-v2`, `dataset-v3` and so on (`https://github.com/tailot/LingoLOGOS/releases/latest` always points at the newest). A release carries `lingologos-dataset.zip` (data, chat pairs, corpus, configs, templates, tools), `grammar.json`, `grammar.yaml`, `DatasetGrammar.gf`, `grammar-metrics.json`, `tokenizer.json`, `tokenizer-metrics.json`, `masking-metrics.json` and `dataset-stats.json`. The files are free to download. `.github/workflows/dataset.yml` produces them in three stages: consistency check plus tokenizer and mask gates, grammar induction, and the release itself.
 
 The learning and checking entry points of that folder, all thin wrappers over the modules documented
-above. The first four are model-free, the last three build and run the pure network of sections 1.8
-and 1.9:
+above. The first four are model-free, the next three build and run the pure network of sections 1.8
+and 1.9, and the last one publishes what they produced:
 
 | entry point | role |
 | --- | --- |
@@ -360,13 +381,17 @@ and 1.9:
 | `dataset/tools/model_data.py` | shared loader: tokenizer, algebra mask, token mask, examples per split, length profile and hardware probe, so training and evaluation cannot drift apart |
 | `dataset/tools/train_model.py` | the training loop of section 1.9 on the real corpus: AdamW with one epoch of warmup and cosine decay, bf16 autocast, masked cross-entropy, per-epoch validation, constrained decoding slice, checkpoints under the git-ignored `dataset/checkpoints/model/` |
 | `dataset/tools/evaluate_model.py` | gates `E1`, `E2`, `E3`, `E5` on a held-out split: exact-tree accuracy with the per-language, per-domain and per-family breakdown, legality through the independent oracle, the registry plus Z3 audit of the trees the model produced, the invented-number audit, and the mask-ablation pass at identical weights |
+| `dataset/tools/publish_to_hub.py` | assembles the release folder `model.safetensors`, `config.json`, `tokenizer.json`, `mask_spec.json`, `metadata.json`, `evaluation_report.json` and the model card `README.md`; refuses a checkpoint whose gate report is not `PASS` unless `--allow-ungated` is given, checks that the reloaded safetensors weights are bit-identical and produce identical logits, records the sha256 of every file, and uploads only when `--upload` is passed and the token is in the environment (`--token-env`, default `HF_TOKEN`). Tested by `tests/test_hub_package.py`, 11 checks |
 
 There is no chat fine-tuning stage and no third-party model in this repository: the assistant that
 answers in natural language is the pure model described in `doc/PURE_MODEL_ROADMAP.md`. Phases 1 to 4
-of that roadmap are measured, phase 5 is the evaluation script above, and the verbalization direction
-is specified but not trained. Sizing notes for consumer cards, the measured saturation of the
-vocabulary, the measured cost of a 20-epoch run and the full flag documentation are in
-`dataset/TRAINING.md` and in section 11 of `README.md`.
+of that roadmap are measured, phase 5 is the evaluation script above together with the release
+packaging below, and the verbalization direction is specified but not trained. The trained weights are
+not in the repository either: they are published as `model.safetensors` in the Hugging Face model
+repository `tailot/lingologos-pure-1`, next to the tokenizer, the mask specification, the gate report
+and the model card assembled by `dataset/tools/publish_to_hub.py`. Sizing notes for consumer cards, the
+measured saturation of the vocabulary, the measured cost of a 20-epoch run and the full flag
+documentation are in `dataset/TRAINING.md` and in section 11 of `README.md`.
 
 ---
 
@@ -573,3 +598,12 @@ the gold protocol step by step, the closing marker available only at completenes
 space separator, `-inf` on every inadmissible logit with admissible scores untouched and zero
 probability mass outside the allowed set, and hard errors on a narrower logits vector or a missing
 alphabet symbol.
+
+The release path adds `tests/test_hub_package.py` (11 tests): the safetensors round trip with the tied
+projection restored and counted once, the report that refuses a file whose tensor count does not match
+the distinct storages of the model, refusal of a header from another track, the algebra mask
+specification round trip through JSON and its refusals, the projection of a gate report into the numbers
+the model card prints, refusal of a report that does not read `PASS`, refusal of a checkpoint whose
+vocabulary disagrees with the tokenizer it names, and the assembled folder: every declared artifact
+present, every recorded sha256 verified against the file on disk, stray files from an earlier run left
+out of the manifest.

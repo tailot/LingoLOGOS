@@ -36,6 +36,7 @@ Related: `doc/TECHNICAL_DOCUMENTATION.md` sections 1.6 and 1.7 (tokenizer and ma
 | 3 | encoder-decoder network, stochastic initialization | done and gated (`test_model.py`, 20 checks) |
 | 4 | training loop with masked cross-entropy | done and measured (20 epochs on the RTX 5070 Ti, ledger below) |
 | 5 | held-out benchmark and Z3 audit of generated answers | done and measured on 675 test rows for both checkpoints (section 7); gates E1, E2, E3, E5 pass, E4 out of scope |
+| release | packaging of what phases 3 to 5 produced: weights in safetensors, mask specification, gate report | published as `tailot/lingologos-pure-1` and verified: round trip of the written file reproduces the checkpoint with a maximum logit difference of 0.0, 48,253,952 parameters, 193,044,672 bytes |
 
 Reproduce phases 1 and 2:
 

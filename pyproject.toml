@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "neuro-symbolic-grammar"
 version = "0.1.0"
-description = "Motore di Induzione Grammaticale e Sintesi Neuro-Simbolica"
+description = "Grammatical induction engine and neuro-symbolic synthesis"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -14,11 +14,15 @@ dependencies = [
     "lark>=1.2.0",
     "pyyaml>=6.0",
     "numpy>=1.24.0",
+    "safetensors>=0.4.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
+]
+publish = [
+    "huggingface_hub>=0.23.0",
 ]
 
 [tool.setuptools.packages.find]

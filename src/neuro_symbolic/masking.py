@@ -418,6 +418,43 @@ class AlgebraMask:
             "max_leaf_length": self.max_leaf_length,
         }
 
+    def to_spec(self) -> Dict[str, Any]:
+        """JSON-safe description of the exact alphabet this mask admits."""
+        return {
+            "arities": {name: int(self.arities[name]) for name in sorted(self.arities)},
+            "leaf_forms": {
+                token: sorted(self.leaf_forms[token]) for token in sorted(self.leaf_forms)
+            },
+            "leaf_value_tokens": sorted(self.leaf_value_tokens),
+            "child_kinds": {
+                name + " " + str(position): sorted(kinds)
+                for (name, position), kinds in sorted(self.child_kinds.items())
+            },
+            "max_leaf_length": self.max_leaf_length,
+        }
+
+    @classmethod
+    def from_spec(cls, spec: Dict[str, Any]) -> "AlgebraMask":
+        """Rebuild the mask described by :meth:`to_spec`, refusing partial data."""
+        if not isinstance(spec, dict):
+            raise AlgebraMaskError("the mask specification must be a mapping")
+        missing = [key for key in ("arities", "leaf_forms") if key not in spec]
+        if missing:
+            raise AlgebraMaskError("the mask specification is missing: " + ", ".join(missing))
+        child_kinds: Dict[Tuple[str, int], Set[str]] = {}
+        for key, kinds in (spec.get("child_kinds") or {}).items():
+            name, separator, position = str(key).rpartition(" ")
+            if not separator or not name or not position.isdigit():
+                raise AlgebraMaskError("malformed child kind key: " + str(key))
+            child_kinds[(name, int(position))] = set(kinds)
+        return cls(
+            arities={str(name): int(arity) for name, arity in spec["arities"].items()},
+            leaf_forms={str(token): set(lengths) for token, lengths in spec["leaf_forms"].items()},
+            leaf_value_tokens=set(spec.get("leaf_value_tokens") or ()),
+            child_kinds=child_kinds,
+            max_leaf_length=int(spec.get("max_leaf_length", MAX_LEAF_LENGTH)),
+        )
+
 
 # ---------------------------------------------------------------------------
 # Token level view: the mask the training and decoding loops use

@@ -15,8 +15,10 @@ which entries are reachable.
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 import torch
@@ -390,3 +392,91 @@ def load_model_metadata(path: str) -> Dict[str, Any]:
     metadata = dict(payload.get("metadata") or {})
     metadata["config"] = payload.get("config")
     return metadata
+
+
+# ---------------------------------------------------------------------------
+# safetensors serialization
+# ---------------------------------------------------------------------------
+def _safetensors_tools():
+    """Return the safetensors entry points, or a clear error if they are absent."""
+    try:
+        from safetensors import safe_open
+        from safetensors.torch import load_model as tensor_load
+        from safetensors.torch import save_model as tensor_save
+    except ImportError as error:
+        raise ModelError("safetensors support requires the safetensors package") from error
+    return safe_open, tensor_save, tensor_load
+
+
+def save_model_safetensors(
+    model: EncoderDecoderModel,
+    path: str,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Write the weights as safetensors, with the schema carried in the header.
+
+    The output projection shares storage with the decoder token table, so
+    safetensors stores that tensor once and :func:`load_model_safetensors`
+    re-ties it on the way back.
+    """
+    safe_open, tensor_save, _ = _safetensors_tools()
+    header = {
+        "format": FORMAT_NAME,
+        "config": json.dumps(model.config.to_dict(), sort_keys=True),
+        "padding_id": str(int(model.padding_id)),
+        "metadata": json.dumps(dict(metadata or {}), sort_keys=True),
+    }
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    tensor_save(model, str(destination), metadata=header)
+    with safe_open(str(destination), framework="pt") as handle:
+        stored = list(handle.keys())
+    declared = list(model.state_dict())
+    distinct: Dict[Any, int] = {}
+    for tensor in model.state_dict().values():
+        distinct[(int(tensor.data_ptr()), tuple(tensor.shape), tensor.dtype)] = int(tensor.numel())
+    if len(stored) != len(distinct):
+        raise ModelError(
+            "safetensors stored " + str(len(stored)) + " tensors for " + str(len(distinct)) + " distinct ones"
+        )
+    return {
+        "path": str(destination),
+        "tensors": len(stored),
+        "declared_names": len(declared),
+        "shared_tensors_stored_once": len(declared) - len(distinct),
+        "parameters": int(sum(distinct.values())),
+        "external_weights": "none",
+    }
+
+
+def load_model_safetensors(path: str, device: Optional[str] = None) -> EncoderDecoderModel:
+    """Rebuild a model from a safetensors file written by this module."""
+    _, _, tensor_load = _safetensors_tools()
+    header = read_model_safetensors_header(path)
+    model = EncoderDecoderModel(
+        ModelConfig.from_dict(header["config"]),
+        padding_id=int(header["padding_id"]),
+    )
+    tensor_load(model, str(path), strict=True)
+    if device:
+        model.to(device)
+    model.eval()
+    return model
+
+
+def read_model_safetensors_header(path: str) -> Dict[str, Any]:
+    """Return configuration and provenance from a safetensors header."""
+    safe_open, _, _ = _safetensors_tools()
+    with safe_open(str(path), framework="pt") as handle:
+        raw = dict(handle.metadata() or {})
+    if raw.get("format") != FORMAT_NAME:
+        raise ModelError("not a " + FORMAT_NAME + " safetensors file: " + str(path))
+    if "config" not in raw:
+        raise ModelError("the safetensors header carries no configuration: " + str(path))
+    return {
+        "format": raw["format"],
+        "config": json.loads(raw["config"]),
+        "padding_id": int(raw.get("padding_id", 0)),
+        "metadata": json.loads(raw.get("metadata", "{}")),
+    }
+

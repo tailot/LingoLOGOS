@@ -9,10 +9,11 @@ the repository root.
 
 ## 0. Environment
 
-The packages already installed for the engine are enough for everything in this folder:
-`torch`, `z3-solver`, `lark`, `pyyaml`, `numpy`, `pytest`. The tokenizer and the mask are pure
-Python plus torch, so there is no extra dependency to install and no second virtual
-environment to maintain.
+The packages already installed for the engine cover everything in this folder: `torch`, `z3-solver`,
+`lark`, `pyyaml`, `numpy`, `pytest`, plus `safetensors`, the release format of the trained weights. Only
+the upload step of section 9 needs one more package, `huggingface_hub` (`pip install -e ".[publish]"`),
+and the tool imports it inside that step, so building and checking a release folder stays local and
+offline.
 
 ```powershell
 python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
@@ -273,7 +274,29 @@ pipeline induced, with gates G1 to G4), `tokenizer.json` and `tokenizer-metrics.
 Model weights are deliberately not part of that pipeline. Hosted runners have no GPU and a six-hour
 limit, the training of section 6 is an 809-second GPU job on this machine, and `upload-artifact` caps an
 artifact near 500 MB with a 90-day expiry while a release asset allows 2 GiB per file. The checkpoint is
-built locally, and publishing it means attaching it to a release rather than to a workflow run:
+built locally, and releasing it is a separate, deliberate act: no stage of the pipeline contacts a hub.
+
+The weights are published on the Hugging Face Hub as `tailot/lingologos-pure-1`, in safetensors form, by
+one tool that reads what the training run left on disk:
+
+```powershell
+python dataset/tools/publish_to_hub.py --checkpoint dataset/checkpoints/model/model_best.pt --report dataset/checkpoints/evaluation/model_best-test.json --out-dir dataset/checkpoints/hub --repo tailot/lingologos-pure-1
+```
+
+That command only builds the folder. Adding `--upload`, after putting the access token in `$env:HF_TOKEN`,
+pushes it to the hub; without the flag the tool touches no network at all. The folder holds seven files:
+`model.safetensors` (193,044,672 bytes, 48,253,952 parameters, the tied output projection stored once and
+re-bound on load), `config.json`, `tokenizer.json`, `mask_spec.json`, `evaluation_report.json`,
+`metadata.json` and a generated `README.md` card. The mask specification matters: it is the same algebra
+mask the trainer used, so a user can keep the hard constraint after downloading the weights instead of
+trusting the card. The build refuses a report whose final verdict is not `PASS`, refuses a checkpoint whose
+recorded vocabulary disagrees with the tokenizer it names, and loads the written file back to compare its
+logits with the checkpoint it came from. For the published weights that round trip covers 261 tensor names
+and 50,261,504 parameter entries and reports a maximum logit difference of 0.0. The folder written by a
+successful run is byte-for-byte the repository on the hub; the upload receipt is written next to it, not
+inside it, so it can never enter the manifest of a later build.
+
+The GitHub release route stays available for the raw checkpoint:
 
 ```powershell
 git tag model-v1
@@ -286,4 +309,5 @@ A verification job can then run the gates of section 7 before publishing, becaus
 flags into its JSON report.
 
 Everything the pipeline runs fits on a CPU runner. `dataset/checkpoints/` stays out of
-git, and no stage of the pipeline contacts an external hub or downloads a model.
+git, the access token is only ever read from the environment and never passed as an argument, and no stage
+of the training or evaluation pipeline contacts an external hub or downloads a model.
