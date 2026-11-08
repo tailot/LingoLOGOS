@@ -28,7 +28,7 @@
   "RUN_CVC": true,
   "DIODE_ON_PORTS": "both",
   "MACROS": [],
-  "NOTE_OPENLANE_VERSION": "Keys are OpenLane 1 flow.tcl names. scripts/build_gds.sh detects OpenLane 2 and maps the equivalent keys. No OpenLane run has been executed in this checkout, see doc/build_instructions.md.",
+  "NOTE_OPENLANE_VERSION": "Keys are OpenLane 1 flow.tcl names, which OpenLane 2 keeps in its Classic flow. The mapping to the native OpenLane 2 spellings is documented upstream but has never been exercised here, and no OpenLane run has been executed in this checkout: see doc/build_instructions.md.",
   "NOTE_PATHS": "A dir:: token resolves to the directory holding this config file, so the RTL sources are referenced one level up, in asic_chip/rtl. tests/test_asic_compiler.py expands every dir:: entry and fails if the named file is missing, which keeps this list honest without running the flow.",
   "NOTE_ROM": "The instruction memory is a 128 by 32 bit read only array initialized in an initial block. Yosys realizes it as constant logic in this flow; production would replace it with a hard ROM macro.",
   "NOTE_DEBUG_PORTS": "LL_DEBUG_PORTS is deliberately undefined here, so the dbg_ port group does not exist in the synthesized netlist and no package pin is reserved for it."

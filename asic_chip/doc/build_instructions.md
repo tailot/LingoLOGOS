@@ -18,7 +18,7 @@ All commands are written to run **from the repository root**, because the file l
 | Lint and simulate | Verilator | 5.006 or later | the C++ harness, the SystemVerilog testbench, latch inference |
 | Second simulator opinion | Icarus Verilog | 11 or later, `-g2012` | `sim-iverilog` |
 | Logic synthesis checks | Yosys | 0.38 or later | optional, memory inference and cell mapping only |
-| Place and route | OpenLane | 1.0.644 (`flow.tcl`) or OpenLane 2 (`openlane`) | GDSII, timing, power, area |
+| Place and route | OpenLane | NOT INSTALLED here; OpenLane 1 runs as `flow.tcl`, OpenLane 2 as `openlane` | GDSII, timing, power, area |
 | PDK | SkyWater `sky130A`, `sky130_fd_sc_hd` | OpenLane managed install | the same |
 
 In the checkout where this tree was written CPython 3.14.5, pytest 9.1.1 and a reachable
@@ -213,18 +213,29 @@ Sourcing `asic_chip/env.sh` sets the variables the flow expects (`OPENLANE_ROOT`
 the `ll-gen` and `ll-check` aliases. It installs nothing, and it is a POSIX shell script,
 so on Windows source it inside WSL or a container rather than in PowerShell.
 
-Installing OpenLane 1 on a Linux host, in outline:
+The OpenLane 2 route installs on the host with pip and runs its steps inside a container.
+The upstream page for that route, under Windows, asks for WSL 2 plus Docker Desktop with WSL
+integration, a quad core CPU at 2.0 GHz or above, 8 GiB of RAM as the minimum and 16 GiB
+recommended. In outline, from a shell inside WSL:
 
 ```sh
-git clone -b 1.0.644 https://github.com/efabless/openlane ~/openlane
-cd ~/openlane && make openlane && make openlane-pdk
+python3 -m pip install openlane volare
+python3 -m openlane --dockerized --smoke-test
 ```
 
-OpenLane 2 installs through its own pip based flow and pulls the sky130A PDK through
-volare; `build_gds.sh` detects it and passes `asic_chip/openlane/config.json` to it, and
-the OpenLane 1 key names used by that file map onto the OpenLane 2 spellings one to one.
-Expect roughly 12 GB of disk for the PDK plus the run, and Docker if you use the
-container image.
+The smoke test pulls the OpenLane 2 container image, and volare then fetches the sky130A
+PDK into the PDK root. The same documentation puts a PDK build at 700 MiB to 1.5 GiB per
+version. Tags published for the image at the time of writing are
+`ghcr.io/efabless/openlane2:2.0.4-amd64` and `ghcr.io/efabless/openlane2:2.0.3`; the
+archived OpenLane 1 image `efabless/openlane:superstable` is 629,969,982 bytes compressed on
+the amd64 channel, according to the registry. None of these downloads has been performed in
+this checkout, so nothing here asserts that the flow completes.
+
+`build_gds.sh` hands `asic_chip/openlane/config.json` to whichever entry point it finds.
+That file carries OpenLane 1 variable names, which OpenLane 2 keeps in its Classic flow; the
+mapping to the native OpenLane 2 spellings is documented upstream but has never been
+exercised on this design, and a native OpenLane 2 flow would want its own configuration
+file. Read `config.json` as written for the OpenLane 1 naming.
 
 Outputs land in `asic_chip/openlane/runs/production_build/`: the final GDSII, the timing
 report at `reports/report.csv`, and the logs. `asic_chip/openlane/lingologos.sdc` declares

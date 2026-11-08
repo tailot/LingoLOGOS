@@ -11,10 +11,14 @@
 ASIC_CHIP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export ASIC_CHIP_DIR
 
-# OpenLane. The flow was authored against OpenLane 1 (flow.tcl). OpenLane 2 uses a
-# different command line; asic_chip/scripts/build_gds.sh detects which one is present.
+# OpenLane. The flow configuration uses OpenLane 1 variable names (flow.tcl). OpenLane 2
+# keeps those names in its Classic flow but has a different command line, and
+# asic_chip/scripts/build_gds.sh detects which one is present. The image names below are the
+# ones published on the registries at the time of writing, looked up over the network and
+# never run from this checkout: efabless/openlane:superstable and efabless/openlane:1.0.0
+# for OpenLane 1, ghcr.io/efabless/openlane2:2.0.4-amd64 for OpenLane 2.
 export OPENLANE_ROOT="${OPENLANE_ROOT:-$HOME/openlane}"
-export OPENLANE_VERSION="${OPENLANE_VERSION:-1.0.644}"
+export OPENLANE_VERSION="${OPENLANE_VERSION:-superstable}"
 
 # SkyWater PDK. The design targets sky130A with the high density standard cells.
 export PDK_ROOT="${PDK_ROOT:-$HOME/pdk}"

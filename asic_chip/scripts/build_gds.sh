@@ -9,13 +9,16 @@
 # numbers, and asic_chip/doc/verification_report.md says so in its own words.
 #
 # What running it really takes:
-#   1. Linux, Docker, and roughly 12 GB of free disk.
-#   2. OpenLane 1:   git clone -b 1.0.644 https://github.com/efabless/openlane \
-#                    then make openlane and make openlane-pdk, or the equivalent
-#                    OpenLane 2 install (openlane2 + sky130A via volare).
+#   1. Linux or WSL 2 with Docker, and free disk for the tool image plus one PDK build.
+#      The upstream documentation puts a PDK build at 700 MiB to 1.5 GiB per version, and
+#      the OpenLane 2 image is on the order of a gigabyte or more per release.
+#   2. OpenLane 2 through pip (python3 -m pip install openlane volare, then
+#      python3 -m openlane --dockerized --smoke-test), or an OpenLane 1 checkout whose
+#      flow.tcl is on PATH with PDK_ROOT pointing at a sky130A install.
 #   3. From the repository root:  sh asic_chip/scripts/build_gds.sh
 #   4. Result lands in asic_chip/openlane/runs/production_build/, with the final
 #      GDSII at 6_final.gds and the timing report at 6_final/reports/report.csv.
+#      Where the outputs land for OpenLane 2 has not been checked: no run has happened.
 # -----------------------------------------------------------------------------
 
 set -eu
@@ -47,9 +50,10 @@ elif [ -n "${OPENLANE_ROOT:-}" ] && [ -f "$OPENLANE_ROOT/flow.tcl" ]; then
     "$OPENLANE_ROOT/flow.tcl" -design "$DESIGN_DIR" -tag "$TAG" -overwrite
 elif command -v openlane >/dev/null 2>&1; then
     # OpenLane 2 takes the configuration as an argument and renames the step outputs.
-    # The keys in config.json are OpenLane 1 names; the OpenLane 2 migration maps the
-    # ones this design uses (design, verilog_files, clock port and period, sdc,
-    # pin_order_cfg, fp_core_util, pl_target_density) onto their OpenLane 2 spellings.
+    # The keys in config.json are OpenLane 1 names, which OpenLane 2 keeps in its Classic
+    # flow. The mapping onto the native OpenLane 2 spellings is documented upstream but has
+    # never been exercised on this design, so this branch is an untested path: if the tool
+    # rejects a key, write an OpenLane 2 configuration next to config.json and run that.
     echo "[INFO] OpenLane 2 detected"
     openlane "$DESIGN_DIR/config.json"
 else
