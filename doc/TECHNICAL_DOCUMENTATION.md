@@ -302,6 +302,88 @@ arithmetic.
   prefixes is re-checked with `AlgebraMask.replay` on untrained weights, and every corrupted stream is
   refused by `validate_stream`.
 
+### 1.10 `asic_chip/` - The Hardware Track
+
+The same three formal mechanisms the software induces and verifies are also described as a
+chip: a fixed function ASIC in SystemVerilog targeting the SkyWater `sky130A` PDK through
+OpenLane. The tree is not hand written where it can be generated. Three JSON artifacts under
+`asic_chip/artifacts/` hold the design data, and `asic_chip/scripts/lingologos_compiler.py`
+is the only description of the datapath: it emits the three generated modules, the golden
+vector table, the core self test table and a manifest with the digest of every file. The
+RTL is checked in, so the checkout is readable, and `--check` re-derives every byte of it
+from the artifacts, which is what makes a hand edited generated file fail instead of drift.
+
+| Artifact | Holds | Feeds |
+| --- | --- | --- |
+| `model_weights.json` | a 4 by 4 matrix of signed 8 bit weights, schema `lingologos-weight-mesh-1` | the constant weight mesh |
+| `gf_rules.json` | field polynomial `0x11D`, initial state, state budget 255, and the four bracket symbols with their multipliers | the bracket automaton |
+| `smt_constraints.json` | eight input bits mapped to variables `A` to `H`, four result lanes, and the clause list in the constraint DSL | the combinational clause evaluator |
+
+**The weight mesh.** The weights are compile time constants, so a product `w * X_c` is never
+a multiplier: it is a shift-add tree built from the non-adjacent form of `w`, which has the
+fewest non-zero digits and no two adjacent ones, so the tree alternates additions and
+subtractions of shifted copies of the single operand. Each row sums four such trees into a
+signed 20 bit accumulator. The generator attaches to every product a partial-sum bound of
+the form `B * |X_c|` and gate `H1` proves the accumulated bound of a row fits the
+accumulator: measured maximum shift 7, worst row bound 35072 against the limit 524287,
+headroom ratio 14.95. Every wire carries that bound in its comment, and the gate suite
+recomputes the bound from those comments and compares it with the datasheet.
+
+**The bracket automaton.** Bracket matching is a product in `GF(2^8)` modulo the irreducible
+polynomial `0x11D`: an opener multiplies the state by `0x02`, a closer by its inverse `0x8E`,
+and the word is balanced exactly when the state returns to the initial value. With one state
+byte the machine has 255 reachable non-zero states and order 255 for the generator `0x02`, so
+the transition table is total: 255 states times 4 alphabet symbols is 1020 defined arms plus
+one default arm that resets. The generator expands the whole table into
+`case` arms of a single combinational block, which makes the step one clock with no
+multiplier and no iteration, and the limitation is a property of the one byte budget rather
+than of the table: round and square brackets share the same two multipliers, so the machine
+recognizes the commutative image of Dyck-2 and accepts `(]`.
+
+**The clause evaluator.** The constraint DSL has prefix `NOT`, prefix and infix `MUX`, and
+`AND`, `OR`, `XOR` as named functions, with precedence `MUX` lower than `OR`, `OR` lower than
+`XOR`, `XOR` lower than `AND`. `select ? set : clear` is the semantics of `MUX`, and each
+clause compiles to a mask over the 8 input bits, so it becomes a pure tree of one bit gates:
+wires only, no `always` block, no latch, no clock. Depth is a property of the tree, measured
+on the dependency graph of the generated wires: 3 levels maximum for the shipped clause set,
+with 3, 2, 4, 3 nodes per clause.
+
+**The core.** An RV32E machine, embedded variant, single cycle, with the minimal implemented
+subset documented in the header of `rtl/core/rv32e_core.sv` and in section 6.1 of the
+integration guide: `LUI`, `AUIPC`, `JAL`, `JALR`, the six branches, the five loads and three
+stores, the immediate and register arithmetic, logic and shift forms, and `FENCE` as a no-op.
+The coprocessor is reached through the custom-0 opcode `0b0001011` with five instructions,
+`LLSMT` for the four clause results of a byte, `LLGFS` for one field step, `LLRDM` for a
+signed readback of a mesh row, `LLCTL` for the access counter and the sticky illegal flag,
+and `LLHALT`; each one drives the request for a single cycle and takes its result in the same
+cycle, which is what zero wait states means here. Anything the subset does not implement
+traps: a 5 bit register field of 16 or above, which is the RV32E register-space rule, any
+64 bit operation, any system or privileged instruction, `FENCE.I`, and a load or store that
+is not naturally aligned. The trap is sticky and reaches bit 4 of the coprocessor status
+word. The firmware is 97 words assembled into the instruction ROM as an initializer, word 79
+is a deliberate illegal probe `ADDI x1, x16, 0`, and the self test writes the mesh result, the
+clause lane word and the GF state back through the window. There is no bus and no external
+memory: program and data live in on-chip arrays, 128 instruction words and 64 data words.
+
+**Reproducibility.** `rtl/generated/MANIFEST.json` records the schema id, the digest of each
+input artifact, the digest of each generated file, and the measurements of the five generator
+gates `H1` to `H5`. The generator writes LF line endings and UTF-8 without a byte order mark
+on every platform, so the recorded digest of a generated file equals what `sha256sum` prints
+for the file in the checkout, and gate 7 of the suite verifies exactly that over the raw
+bytes.
+
+**Status of this track, stated without inflation.** Python carries the generator, its five
+gates, and 23 tests that recompute the datapath, the field, the clause masks and the
+instruction semantics from an independent model. Verilator 5.054, run from the image
+`verilator/verilator:latest`, linted the design clean under `-Wall` and replayed all 304
+golden rows plus the core self test in two independent paths, 0 mismatches, and along the way
+it reported defects in the RTL and in the checkers, items 7 to 16 of section 4 of the report,
+all fixed. No place and route, no synthesis, no
+static timing and no second simulator have been run anywhere, so no timing, power or area
+number exists, and the 4.0 ns clock period in the SDC is a declared budget rather than a met
+result. `asic_chip/doc/verification_report.md` separates executed from declared claim by
+claim.
+
 ---
 
 ## 2. Step-by-Step Configuration and Training Guide
@@ -319,6 +401,11 @@ arithmetic.
 - Optional, used only when publishing: `huggingface_hub >= 0.23.0`, installed with
   `pip install -e ".[publish]"`. `dataset/tools/publish_to_hub.py` imports it inside the upload step and
   nowhere else, so building a release folder needs no Hub package and no network access.
+- The `asic_chip/` track of section 1.10 adds no dependency at all: its generator uses only the Python
+  standard library and its gates run inside `pytest`. The tools that would take it further, Verilator,
+  Icarus Verilog, Yosys and OpenLane with the sky130A PDK, are external programs, not packages, and none
+  of them is installed in the checkout where this track was written. Section 2.5 gives the commands and
+  marks what was actually run.
 
 Installation:
 ```bash
@@ -392,6 +479,44 @@ repository `tailot/lingologos-pure-1`, next to the tokenizer, the mask specifica
 and the model card assembled by `dataset/tools/publish_to_hub.py`. Sizing notes for consumer cards, the
 measured saturation of the vocabulary, the measured cost of a 20-epoch run and the full flag
 documentation are in `dataset/TRAINING.md` and in section 11 of `README.md`.
+
+### 2.5 Building and Checking the `asic_chip/` Track
+
+Every command runs from the repository root, because the file lists in `asic_chip/config.json`,
+in `asic_chip/Makefile` and in `sim/sim_main.cpp` are relative to it.
+
+| step | command | tool | status in this checkout |
+| --- | --- | --- | --- |
+| regenerate the generated RTL, both vector tables and the manifest | `python asic_chip/scripts/lingologos_compiler.py` | CPython, standard library only | EXECUTED, `FINAL VERDICT: PASS` |
+| prove the checked in files are the current ones | `python asic_chip/scripts/lingologos_compiler.py --check` | same | EXECUTED, adds the `RTL_matches_artifacts` gate |
+| run the gate suite required by `AGENTS.md` | `pytest -v tests/` | pytest | EXECUTED, 181 passed |
+| lint and infer latches | `verilator --lint-only ... -DLL_DEBUG_PORTS --top-module lingologos_top` | Verilator 5.006 or later | EXECUTED in the image `verilator/verilator:latest`, Verilator 5.054, through `make -f asic_chip/Makefile lint`: exit 0, no warning left. NOT RUN on the host, where there is no Verilator and no `make` |
+| replay the 304 golden rows against Verilog | `verilator --cc --exe --build ... sim/sim_main.cpp` | Verilator and a C++ compiler | EXECUTED in that image, through `make -f asic_chip/Makefile sim-verilator`: 304 rows plus the core self test, 0 mismatches, `FINAL VERDICT: PASS`, 91 clock cycles for the self test, VCD written |
+| run the SystemVerilog testbench | `verilator --binary --timing ...` | Verilator | EXECUTED in that image, through `make -f asic_chip/Makefile sim-tb`: same checks, same verdict |
+| run the testbench in a second simulator | `iverilog -g2012` plus `vvp` | Icarus Verilog | NOT RUN, Icarus is not installed |
+| place and route | `sh asic_chip/scripts/build_gds.sh` | OpenLane 1 or 2 plus the sky130A PDK | NOT RUN, the script reports that neither `flow.tcl` nor `openlane` is on `PATH` and exits 127 |
+
+The three Verilator rows ran in the official container image with the checkout mounted at
+`/work`, the route `asic_chip/doc/build_instructions.md` documents for a host that has no
+Verilator: that image carries its own `make` and a C++ compiler, so the make targets work
+there unchanged. Section 2.4 of `asic_chip/doc/verification_report.md` quotes the output those
+runs produced, and section 1 of the same report lists which tools were present where.
+
+The generator refuses to emit RTL when one of its own gates fails: `H1` the shift-add trees fit
+the 20 bit accumulator, `H2` the field table is closed and irreducible, `H3` the clause network
+is latch free with no unused lane, `H4` every vector row is in range, `H5` the core self test
+agrees with the engines. `--lenient` reports the failing gate instead of stopping, and the final
+verdict stays `FAIL`, so an experiment can inspect the numbers without producing RTL that
+silently violates the contract. `--out-dir` and `--sim-dir` write to a scratch directory, which
+is how the reproducibility gate regenerates without touching the checkout.
+
+The tool chain beyond Python is external and is not a package dependency of this project: the
+generator imports nothing outside the standard library, and the gate suite needs only the
+`pytest` already declared in `requirements.txt` and `pyproject.toml`. That is why the ASIC gates
+run in CI on Python 3.10, 3.11 and 3.12 even though no runner has an HDL tool. `requirements.txt`
+and `pyproject.toml` are unchanged by this track, and `.gitignore` now ignores the build products
+`asic_chip/sim/obj_dir`, `obj_dir_tb`, `obj_dir_vvp`, `*.vcd`, `*.vvp` and `asic_chip/openlane/runs`
+while keeping `asic_chip/rtl/generated` versioned on purpose.
 
 ---
 
@@ -572,9 +697,14 @@ To maintain high engineering and academic standards:
 3. **Certificate incompleteness.** The per-non-terminal signature proves soundness but is not complete (`INCONCLUSIVE` is possible); witness search is bounded by `--search-bound`.
 4. **Model class.** A CNF PCFG with $K$ latent symbols cannot represent languages whose CNF needs more symbols, and the inside objective does not encourage disambiguation: several grammars fit the corpus, and only the extracted one is verified.
 5. **No bit-exact reproducibility.** No global `torch` seed or deterministic algorithm setting is enforced inside the library; only `synthesize.py` seeds `random`/`torch`, so artifacts are reproducible per machine/build, not across PyTorch releases.
+6. **The hardware track has no silicon evidence yet.** Verilator 5.054 ran in the container image `verilator/verilator:latest`, and linted and simulated the design: the RTL elaborates clean under `-Wall`, runs latch free, and reproduces all 304 golden vector rows plus the core self test with 0 mismatches in two independent paths. That is simulation, nothing more. There is no Icarus, no Yosys, no OpenLane and no sky130A PDK here, and none of them ran anywhere, so no synthesis, no static timing, no power and no area number exists, and no second simulator has seen this RTL. The 4.0 ns period in `asic_chip/openlane/lingologos.sdc` is a declared budget, every electrical cell of the datasheet says NOT MEASURED, and the behavioral and structural claims of section 1.10 beyond simulation remain verified in Python only.
+7. **The hardware bracket tracker recognizes the commutative image of Dyck-2.** With one state byte, round and square brackets must share the same two multipliers, so the automaton accepts `(]` and `][`. This is the same over-generation the software soundness certificate was built to catch, and it is declared in `asic_chip/artifacts/gf_rules.json` and in the datasheet instead of being papered over.
+8. **The core implements a documented subset, not a profile.** Every 64 bit operation, every system and privileged instruction, `FENCE.I`, any register field of 16 or above and any unaligned access are reported as illegal rather than performed; the 97 word firmware is an instruction-set self test of that subset, not an application.
+9. **No electrical characterization.** Absolute maximum ratings, supply current ranges and junction temperature limits are not characterized, and the package entry in `asic_chip/config.json` is a declared body chosen to fit 146 signal bits plus the declared power pins, not a purchased part.
 
 ### 4.5 Coverage of the Test Suite
-`tests/` (99 tests) locks, in particular: the distribution invariant for the parser and for the
+`tests/` (181 tests collected, 158 of them outside the two ASIC files of section 1.10) locks,
+in particular: the distribution invariant for the parser and for the
 extracted grammar; inside vs Viterbi agreement; post-pruning renormalization against
 `probability_pre_pruning`; disjoint train/test split; the corrected semantics of
 `check_word_balance_z3` (regression: `())`, `)(`, `][`, `((`, `[(]`, `(()[]` must be `INVALID`);
@@ -607,3 +737,32 @@ the model card prints, refusal of a report that does not read `PASS`, refusal of
 vocabulary disagrees with the tokenizer it names, and the assembled folder: every declared artifact
 present, every recorded sha256 verified against the file on disk, stray files from an earlier run left
 out of the manifest.
+
+The hardware track adds two suites and one helper. `tests/asic_reference_model.py` is not a test file:
+it is an independent model of the chip, with its own dot product, its own `GF(2^8)` arithmetic over
+`0x11D`, its own shunting-yard parser and mask evaluator for the clause DSL, and its own RV32E
+emulator. It never imports the generator, which is what makes the cross-check non-circular.
+`tests/test_asic_compiler.py` (17 tests) evaluates the generated wire netlist with a small interpreter
+and compares it with that plain dot product; recomputes all 1020 automaton arms with field arithmetic
+and checks the alphabet against the grammar artifact and the single default arm; derives each clause
+lane word three ways, through the model masks, through the generator parser and through the generated
+netlist text, for all 256 input bytes, and proves the network is latch free and that the depth quoted
+in the configuration equals the depth of the generated wire dependency graph; recomputes every column
+of all 304 golden vector rows without the generator; regenerates into a scratch directory and requires
+byte-identical output plus a passing `--check`; recomputes the manifest digests over the raw bytes on
+disk; checks the self test memory against the engines; checks that the literals baked into the
+testbench and into the C++ harness equal the memory file and that the 400 cycle harness budget covers
+the run, 89 cycles in the emulator and 91 as the harness itself measures, and that the row count the
+testbench states equals the number of data lines in the vector file; checks that the harness touches
+only declared top level ports and that the
+debug group lives inside `LL_DEBUG_PORTS`; reconciles the port list, the bit counts, the datasheet pin
+table and all 37 lines of the pin order plan; reconciles the SDC and the OpenLane configuration with
+`asic_chip/config.json`; recomputes every quantitative claim of the datasheet including the switching
+activity over the 303 transitions of the vector file and the three artifact digests it quotes; enforces
+the ASCII, English and LF policy over the whole `asic_chip/` tree; and locks the `select ? set : clear`
+semantics of `MUX` after a wrong mask identity in the reference model was caught by the cross-check.
+`tests/test_asic_core_firmware.py` (6 tests) checks that the instruction ROM is complete and matches
+the configuration, that every executed encoding is inside the documented subset, that the illegal
+encoding is the documented `x16` probe, that the emulated run reproduces every entry of
+`asic_chip/sim/core_self_test.mem`, that the run fits the harness cycle budget, and that data memory
+readback matches the model.

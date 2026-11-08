@@ -13,3 +13,14 @@ dataset/_smoke/
 .venv*/
 venv/
 
+# ASIC build products under asic_chip: Verilator model directories, simulator
+# dumps and OpenLane run directories. The generated RTL under
+# asic_chip/rtl/generated is deliberately versioned, not ignored.
+asic_chip/sim/obj_dir/
+asic_chip/sim/obj_dir_tb/
+asic_chip/sim/obj_dir_vvp/
+asic_chip/sim/*.vcd
+asic_chip/sim/*.vvp
+asic_chip/openlane/runs/
+asic_chip/openlane/*.log
+

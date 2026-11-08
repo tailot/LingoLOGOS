@@ -1,0 +1,50 @@
+{
+  "schema": "lingologos-smt-clauses-1",
+  "input_bits": 8,
+  "result_lanes": 4,
+  "variable_bits": {
+    "A": 0,
+    "B": 1,
+    "C": 2,
+    "D": 3,
+    "E": 4,
+    "F": 5,
+    "G": 6,
+    "H": 7
+  },
+  "clauses": [
+    {
+      "id": 0,
+      "expr": "(A AND B) OR (NOT C)"
+    },
+    {
+      "id": 1,
+      "expr": "XOR(A, C) MUX B"
+    },
+    {
+      "id": 2,
+      "expr": "(A OR B) AND NOT (C XOR D)"
+    },
+    {
+      "id": 3,
+      "expr": "MUX(E, XOR(A, B), AND(C, D))"
+    }
+  ],
+  "provenance": {
+    "source": "section 2 of the LingoLOGOS ASIC specification, Combinatorial SMT Z3 Evaluator",
+    "dsl": [
+      "AND, OR, XOR take two or more operands, NOT takes one, MUX takes exactly three",
+      "operands (select, when-set value, when-clear value), parentheses group.",
+      "Variables are the single letters A to H, mapped to the declared bit positions of the",
+      "8-bit pad input smt_in_bits."
+    ],
+    "note": [
+      "Clauses 0 and 1 are the two examples the specification ships verbatim.",
+      "Clauses 2 and 3 exercise the deeper netlist shapes (nested AND/OR/NOT and a MUX whose",
+      "data inputs are themselves gates), because the four result lanes of the datasheet pin",
+      "table are four clause slots and slots 2 and 3 would otherwise be constant zero.",
+      "These four clauses are a hardware test network. They are not the compiled form of the",
+      "Z3 assertions produced by dataset/tools/logic_map.py: no such compiler exists here."
+    ]
+  }
+}

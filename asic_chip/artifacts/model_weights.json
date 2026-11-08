@@ -1,0 +1,25 @@
+{
+  "schema": "lingologos-weight-mesh-1",
+  "weight_matrix": {
+    "dimensions": [4, 4],
+    "precision": "INT8",
+    "accumulator_bits": 20,
+    "values": [
+      [12, -45, 0, 89],
+      [-128, 64, -3, 0],
+      [15, 0, -90, 42],
+      [7, -1, 100, -12]
+    ]
+  },
+  "provenance": {
+    "source": "section 2 of the LingoLOGOS ASIC specification",
+    "kind": "fixed reference weights, not quantized network weights",
+    "note": [
+      "These are the INT8 constants the specification ships as the mesh test vector set.",
+      "No INT8 quantization of artifacts/grammar_weights.pt exists in this repository, so this",
+      "matrix must not be read as the compiled projection of the trained PCFG.",
+      "accumulator_bits is the signed width of every row sum and of every partial sum in the",
+      "generated adder tree; the compiler refuses a matrix whose partial sums do not fit it."
+    ]
+  }
+}

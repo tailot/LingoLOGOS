@@ -200,6 +200,16 @@ documentation cannot drift away from the code). Its contract:
 │   ├── grammar.yaml               # Discrete CNF productions in YAML format
 │   ├── grammar_weights.pt         # Saved PyTorch checkpoint (rule / term / family logits)
 │   └── metrics.json               # Metrics, verification report and acceptance gates
+├── asic_chip/
+│   ├── artifacts/                   # Weight mesh, GF rules and SMT clauses: the only source of the RTL
+│   ├── config.json                  # Public ports, datapath limits, package and path declarations
+│   ├── doc/                         # Datasheet, integration guide, verification report, build instructions
+│   ├── env.sh                       # POSIX environment for the container flow
+│   ├── Makefile                     # gen check sim-verilator sim-tb sim-iverilog lint pytest openlane clean
+│   ├── openlane/                    # SkyWater sky130A config, SDC with the 4.0 ns budget, pin plan
+│   ├── rtl/                         # Generated mesh, GF automaton and clause netlist, RV32E core, top level
+│   ├── scripts/                     # lingologos_compiler.py and the OpenLane entry point
+│   └── sim/                         # C++ harness, SystemVerilog testbench, golden vectors, core self test
 ├── doc/
 │   └── TECHNICAL_DOCUMENTATION.md # Comprehensive engineering and mathematical docs
 ├── src/
@@ -226,7 +236,10 @@ documentation cannot drift away from the code). Its contract:
 │   ├── test_training.py           # Admissible-set table, masked CE, schedules, constrained overfit proof
 │   ├── test_evaluation_tools.py   # Gate arithmetic of the checkpoint evaluator (accuracy and audits)
 │   ├── test_hub_package.py        # safetensors round trip, mask specification, gate refusal, release folder
-│   └── test_verification.py       # Z3 certificate (UNSAT) and refutation of over-generating grammars
+│   ├── test_verification.py       # Z3 certificate (UNSAT) and refutation of over-generating grammars
+│   ├── asic_reference_model.py    # Helper, not a test: independent model of the ASIC datapath, GF field and RV32E core
+│   ├── test_asic_compiler.py      # Gates that recompute every numeric claim in the ASIC tree from the committed files
+│   └── test_asic_core_firmware.py # RV32E firmware emulation checked against the committed self test table
 ├── AGENTS.md                      # Mandatory instructions for AI agents
 ├── pyproject.toml                 # Build metadata, packaging, and pytest configuration
 ├── requirements.txt               # Project dependencies
@@ -290,7 +303,7 @@ $$A \to a:\ \delta = e(a),\ m = e(a) \qquad A \to B\,C:\ \delta = \delta_B + \de
 | **Selectivity (negative controls)** | `verify_negative_controls` | 100% rejection of 200 non-Dyck strings | **PASS (200/200)** |
 | **Rule induction quality** | `gold_rule_f1` | $F_1 \ge 0.90$ under NT alignment | **PASS (1.000)** |
 | **Language inclusion** | Z3 SMT Solver | **UNSAT** on certificate $+ \neg G$ | **PASS (UNSAT)** |
-| **Unit / integration tests** | pytest | All tests PASSED | **PASS (43 passed)** |
+| **Unit / integration tests** | pytest | All tests PASSED | **PASS (181 passed)** |
 
 ---
 
@@ -305,6 +318,8 @@ $$A \to a:\ \delta = e(a),\ m = e(a) \qquad A \to B\,C:\ \delta = \delta_B + \de
 - NumPy (`numpy`)
 - Safetensors (`safetensors`), the release format of the pure-model weights
 - pytest (`pytest`)
+
+The ASIC track of section 12 needs nothing beyond CPython and pytest for generation and gates. Verilator 5.006 or later, Icarus Verilog 11 or later, Yosys 0.38 or later and OpenLane 1 or 2 with the SkyWater `sky130A` PDK are external programs, not Python packages, and none of them is installed on the host this tree was written on. Verilator 5.054 ran from the image `verilator/verilator:latest`, which is how the lint and both simulation paths of section 12.3 were executed; Icarus, Yosys and OpenLane were never run. `asic_chip/doc/build_instructions.md` says what to install and how to run the same commands in that image, and `asic_chip/doc/verification_report.md` says what that leaves unverified.
 
 Install dependencies:
 ```bash
@@ -349,10 +364,18 @@ Execute unit and integration tests:
 ```bash
 pytest -v tests/
 ```
+The suite also carries the gates of the ASIC track described in section 12: `tests/test_asic_compiler.py`
+recomputes every numeric claim in `asic_chip/` from the committed files and
+`tests/test_asic_core_firmware.py` emulates the core firmware, so 181 tests pass in this
+checkout with no HDL tool on the host. The ASIC steps that do need an external tool are
+documented in `asic_chip/doc/build_instructions.md`: Verilator 5.054 linted and simulated the
+design inside the image `verilator/verilator:latest`, while Icarus Verilog and OpenLane were
+never run.
 
 ### Continuous Integration (GitHub Actions)
 Tests and formal verification run automatically on push or pull requests via `.github/workflows/ci.yml` across Python **3.10**, **3.11**, and **3.12**.
 The companion pipeline `.github/workflows/dataset.yml` runs on changes under `dataset/`: corpus consistency, the tokenizer gates `T1`-`T5`, the mask gates `M1`-`M5`, grammar induction, and the GitHub Release that carries the artifacts.
+The ASIC gates run inside `pytest -v tests/` and therefore in CI, because they are pure Python; the Verilator and OpenLane steps are not in CI, and `asic_chip/doc/verification_report.md` states that as a limit on what is verified.
 
 ---
 
@@ -589,3 +612,89 @@ gh release upload model-v1 dataset\checkpoints\model\model_best.pt --clobber
 Training itself stays off hosted runners: they have no GPU, the 20-epoch run is an 809-second CUDA job
 here, and a verification job only needs to run `dataset/tools/evaluate_model.py`, which exits with code 1
 when any gate fails and writes the per-gate `passed` flags into its report.
+
+---
+
+## 12. ASIC Implementation Track (`asic_chip/`)
+
+`asic_chip/` is the hardware side of the project: a fixed function chip that runs the same
+three formal mechanisms the software trains, in silicon. It is a complete RTL tree with a
+generated datapath, a core, a testbench, a C++ harness, an OpenLane configuration and four
+documents. The whole tree is written to be reproducible from three JSON artifacts, and every
+number in its documentation is either a measured value with the command that measured it, or
+it is labeled as not measured.
+
+### 12.1 The four engines
+
+| Block | File | What it does | Declared resource |
+|---|---|---|---|
+| Weight ROM mesh | `rtl/generated/weight_rom_mesh.sv` | 4 by 4 constant dot product on four signed 8 bit lanes, as shift-add trees in non-adjacent form | no multiplier: largest shift 7, worst partial sum bound 35072 in a 20 bit accumulator, headroom ratio 14.95 |
+| GF(2^8) tracker | `rtl/generated/gf_automaton_1cycle.sv` | bracket matching as a field product over the polynomial `0x11D`, one cycle per symbol | 255 reachable states, 1020 defined transition arms, one default arm that resets |
+| SMT evaluator | `rtl/generated/smt_evaluator.sv` | four clauses of the constraint DSL evaluated combinationally on 8 input bits | 4 result lanes, deepest cone 3 levels, wires only, no clock |
+| Control core | `rtl/core/rv32e_core.sv` | RV32E, minimal implemented subset, 97 word firmware, coprocessor window and status word | 128 word instruction ROM, 9 bit program counter, 64 word data memory, illegal encodings trap |
+
+The top level is `rtl/top/lingologos_top.sv`: 18 public ports, 51 input bits and 95 output
+bits, 146 signal bits for the pad plan. Twelve further debug ports, 302 bits, exist only
+under `LL_DEBUG_PORTS` for simulation and never reach synthesis or the pin plan. The GF
+tracker keeps the one byte state budget the specification declares, which is why it
+recognizes the commutative image of Dyck-2 and accepts `(]`; that limitation is written in
+the artifact and in the datasheet rather than hidden.
+
+### 12.2 One source of truth
+
+```sh
+python asic_chip/scripts/lingologos_compiler.py          # regenerate, then gate H1 to H5
+python asic_chip/scripts/lingologos_compiler.py --check  # prove the committed files are the current ones
+python -m pytest -v tests/                               # the gate suite required by AGENTS.md
+```
+
+The generator is the only description of the datapath: it emits the three generated modules,
+`sim/golden_vectors.mem` (304 rows with expected results), `sim/core_self_test.mem` and
+`rtl/generated/MANIFEST.json` with the sha256 digest of every artifact and every generated
+file. A failing gate stops the run, so an artifact that does not fit the accumulator or a GF
+alphabet that leaves the state table cannot silently produce RTL. `asic_chip/scripts/build_gds.sh`
+refuses to start a place and route until `--check` passes, which is what keeps a stale
+`rtl/generated` directory out of a layout.
+
+### 12.3 Verification status, executed against not run
+
+`python -m pytest -v tests/` in this checkout: **181 passed**, zero failures, zero errors.
+Twenty three of those tests target the ASIC tree: seventeen in `tests/test_asic_compiler.py`
+and six in `tests/test_asic_core_firmware.py`, plus the helper model in
+`tests/asic_reference_model.py` that recomputes the dot product, the GF field, the clause
+masks and the RV32E semantics without importing the generator.
+
+| Level | Content | Status in this checkout |
+|---|---|---|
+| L0 to L3 | artifact validity, generator gates H1 to H5, agreement of two independent models on every vector row and every input byte, byte level reproducibility and digests | EXECUTED by CPython 3.14.5 and pytest 9.1.1 |
+| Core behavior | the 97 word firmware emulated by the reference model: 89 cycles, 4 coprocessor accesses, one illegal `x16` probe at ROM slot 79, final registers `x8=0x00000009`, `x10=0x00000002`, `x11=0x0000104A`, `x13=0x00000013` | CROSS-CHECKED by emulation, and confirmed by simulation: both paths below assert the same readback, and the harness measures 91 cycles for the same run |
+| L4 | Verilator lint, the C++ harness over the 304 golden rows, the SystemVerilog testbench, Icarus | EXECUTED in the container image `verilator/verilator:latest` with Verilator 5.054: lint clean under `-Wall`, and both the harness and the testbench reporting `checked 304 vector rows plus the core self-test, 0 mismatches` and `FINAL VERDICT: PASS`, through the make targets of `asic_chip/Makefile`. NOT RUN on the host, NOT RUN with Icarus |
+| L5 | synthesis, static timing at the declared 4.0 ns budget, power, area, GDSII, DRC and LVS | NOT RUN and NOT MEASURED, no OpenLane and no PDK in this checkout |
+
+The verification layer found real things, and the report names all sixteen of them. The
+Python gates caught the reference model using the wrong boolean identity for `MUX`, a stale
+artifact digest and the wrong combinational depth in the datasheet, generated files written
+with platform line endings, and switching activity figures that did not match the committed
+vector file. Linting the design then caught an illegal part select in the branch and jump
+cone, a combinational loop through a write through read path in the register file, blocking
+writes inside a sequential block, silent width widening in the generated mesh, and a dangling
+port at the top level. The two simulation paths caught a testbench that was checking 1024
+vector rows instead of 304, a checker that sampled the registered outputs one delta too
+early, and a coprocessor counter expectation that was off by one in both checkers. All of it
+is fixed: the cases the Python gates found have a test that fails if they return, and the
+others stop the lint or the build of the same flow. Read
+`asic_chip/doc/verification_report.md` before repeating any claim from the datasheet.
+
+### 12.4 Documents
+
+| Document | Content |
+|---|---|
+| `asic_chip/doc/datasheet_lingologos.md` | pinout for the declared QFN-160 body, port table, per block measured properties, stimulus statistics, the declared operating point with every electrical cell marked NOT MEASURED, and the pointer to the report that will replace them |
+| `asic_chip/doc/integration_guide.md` | how to drive the chip: reset and start protocol, the `gf_symbol_in` hazard and how to avoid it, the implemented RV32E subset as the decoder sees it, the firmware map, the coprocessor window, the four places to change together when the pin plan moves, and the deviation table |
+| `asic_chip/doc/verification_report.md` | what ran, what did not, tool inventory, gate by gate results, defects caught, and what a reviewer still has to do |
+| `asic_chip/doc/build_instructions.md` | prerequisites with versions, every command for generation, pytest, Verilator, Icarus and OpenLane, make target table, platform notes, troubleshooting |
+
+No new third party dependency enters the project for this track: the generator uses only the
+Python standard library, and the gate suite needs the `pytest` already declared in
+`requirements.txt` and `pyproject.toml`. Verilator, Icarus, Yosys and OpenLane are external
+tools the build instructions describe and this checkout does not have.

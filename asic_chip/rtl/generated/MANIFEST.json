@@ -1,0 +1,117 @@
+{
+  "schema": "lingologos-manifest-1",
+  "generator": "asic_chip/scripts/lingologos_compiler.py",
+  "artifact_digests": {
+    "model_weights.json": "f7ff9dc8c2229eb3",
+    "gf_rules.json": "85c612cdcf543dd5",
+    "smt_constraints.json": "e36bbf1cff8c16fe"
+  },
+  "output_digests": {
+    "weight_rom_mesh.sv": "8d92a04b2564ea54",
+    "gf_automaton_1cycle.sv": "5ddfa365a06656b5",
+    "smt_evaluator.sv": "1ad234749b76173d"
+  },
+  "golden_vectors_digest": "fdae978122b48094",
+  "self_test_digest": "ae0fd99472a25ab0",
+  "measurements": {
+    "H1_mesh": {
+      "dims": [
+        4,
+        4
+      ],
+      "accumulator_bits": 20,
+      "accumulator_limit": 524287,
+      "max_shift": 7,
+      "worst_partial_sum_bound": 35072,
+      "headroom_ratio": 14.95
+    },
+    "H2_gf": {
+      "polynomial": "0x11D",
+      "irreducible": true,
+      "reachable_states": 255,
+      "state_budget": 255,
+      "defined_transitions": 1020,
+      "symbol_orders": [
+        255
+      ]
+    },
+    "H3_smt": {
+      "clauses": 4,
+      "result_lanes": 4,
+      "unused_lanes": [],
+      "max_logic_depth": 3,
+      "clause_nodes": {
+        "0": 3,
+        "1": 2,
+        "2": 4,
+        "3": 3
+      }
+    },
+    "H4_vectors": {
+      "rows": 304,
+      "seed": 42,
+      "distinct_smt_bytes": 256,
+      "final_gf_state": "0x8E",
+      "bracket_words": [
+        {
+          "name": "balanced_round_and_square",
+          "symbols": [
+            "0x28",
+            "0x29",
+            "0x5B",
+            "0x5D"
+          ],
+          "state_before": "0x04",
+          "state_after": "0x04",
+          "returns_to_start": true
+        },
+        {
+          "name": "crossed_round_open_square_close",
+          "symbols": [
+            "0x28",
+            "0x5D"
+          ],
+          "state_before": "0x04",
+          "state_after": "0x04",
+          "returns_to_start": true
+        },
+        {
+          "name": "three_unmatched_opens",
+          "symbols": [
+            "0x28",
+            "0x28",
+            "0x28"
+          ],
+          "state_before": "0x04",
+          "state_after": "0x20",
+          "returns_to_start": false
+        }
+      ]
+    },
+    "H5_selftest": {
+      "in_vector": [
+        10,
+        -5,
+        2,
+        100
+      ],
+      "row_sums": [
+        9245,
+        -1606,
+        4170,
+        -925
+      ],
+      "smt_readback": "0x09",
+      "gf_state_after_step": "0x02",
+      "gf_state_after_idle": "0x01",
+      "status_word": "0x13"
+    }
+  },
+  "gates": {
+    "H1_weight_mesh_fits": true,
+    "H2_gf_table_closed": true,
+    "H3_smt_netlist_latch_free": true,
+    "H4_golden_vectors_in_range": true,
+    "H5_core_self_test_consistent": true
+  }
+}

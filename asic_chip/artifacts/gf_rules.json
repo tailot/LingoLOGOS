@@ -1,0 +1,56 @@
+{
+  "schema": "lingologos-gf-automaton-1",
+  "field": "GF256",
+  "polynomial": "0x11D",
+  "initial_state": "0x01",
+  "state_budget": 255,
+  "symbols": [
+    {
+      "name": "OPN_R",
+      "byte": "0x28",
+      "multiplier": "0x02",
+      "role": "round open, multiply the state by alpha"
+    },
+    {
+      "name": "CLS_R",
+      "byte": "0x29",
+      "multiplier": "0x8E",
+      "role": "round close, multiply the state by alpha inverse"
+    },
+    {
+      "name": "OPN_S",
+      "byte": "0x5B",
+      "multiplier": "0x02",
+      "role": "square open, multiply the state by alpha"
+    },
+    {
+      "name": "CLS_S",
+      "byte": "0x5D",
+      "multiplier": "0x8E",
+      "role": "square close, multiply the state by alpha inverse"
+    }
+  ],
+  "provenance": {
+    "source": "section 1 and 2 of the LingoLOGOS ASIC specification, GF(2^8) automaton",
+    "semantics": [
+      "The state is a field element. Reading a bracket multiplies the state by that symbol",
+      "multiplier in GF(2^8) modulo 0x11D, so the state after a word w is the product of the",
+      "multipliers of its letters, and the initial state 0x01 is reached again exactly when the",
+      "number of open brackets equals the number of close brackets, modulo the order of alpha.",
+      "The compiler enumerates the reachable states from the initial state, computes every",
+      "transition with field arithmetic, and emits the closed table as a unique case netlist.",
+      "alpha = 0x02 has multiplicative order 255, so the closure is the whole nonzero field:",
+      "255 states, 1020 transitions for the four declared symbols."
+    ],
+    "known_limitations": [
+      "The automaton recognizes the commutative image of Dyck-2, not Dyck-2: it accepts the",
+      "crossed words (] and ][ because multiplication commutes, so the bracket classes cannot",
+      "be distinguished by any GF(2^8) multiplier pair with equal and inverse values.",
+      "Because alpha has order 255, a word with 255 more opens than closes also returns to the",
+      "initial state, so the count invariant is modulo 255 and not exact.",
+      "A finite automaton on 256 states cannot recognize Dyck-2 at all: the language needs an",
+      "unbounded stack (Myhill-Nerode), so a bounded-depth prefix invariant is the strongest",
+      "property any automaton of this size can check."
+    ]
+  }
+}

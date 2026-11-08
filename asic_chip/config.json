@@ -1,0 +1,75 @@
+{
+  "schema": "lingologos-chip-config-1",
+  "top_module": "lingologos_top",
+  "pdk": "sky130A",
+  "std_cell_library": "sky130_fd_sc_hd",
+  "clock_port": "clk",
+  "clock_mhz": 250,
+  "clock_period_ns": 4.0,
+  "package": {
+    "name": "QFN-160, 0.4 mm pitch, 9 x 9 mm, exposed thermal pad",
+    "signal_pins": 146,
+    "power_pins": 14,
+    "vdd_domains": 1,
+    "note": "The LingoLOGOS ASIC specification section 7 names QFN-48 and QFN-64. Those packages cannot carry the interface the same section describes: 146 user signal bits plus power and ground need 160 pads. The count here is measured from the port list in rtl/top/lingologos_top.sv."
+  },
+  "ports": {
+    "input_bits": 51,
+    "output_bits": 95,
+    "total_bits": 146,
+    "debug_ports": 12,
+    "debug_ports_only_in_simulation": true,
+    "debug_macro": "LL_DEBUG_PORTS"
+  },
+  "latency_cycles": {
+    "out_vector": 1,
+    "gf_next_state": 1,
+    "smt_results": 0
+  },
+  "datapath": {
+    "mesh_rows": 4,
+    "mesh_columns": 4,
+    "input_bits_per_lane": 8,
+    "accumulator_bits": 20,
+    "gf_state_bits": 8,
+    "gf_field_polynomial": "0x11D",
+    "gf_reachable_states": 255,
+    "gf_defined_transitions": 1020,
+    "smt_input_bits": 8,
+    "smt_result_lanes": 4,
+    "smt_max_logic_depth": 3,
+    "core_isa": "RV32E",
+    "core_registers": 16,
+    "core_imem_words": 128,
+    "core_pc_bits": 9,
+    "core_dmem_words": 64,
+    "core_coprocessor_instructions": 4,
+    "core_firmware_words": 97,
+    "core_illegal_probe_word_index": 79
+  },
+  "paths": {
+    "rtl_top": "rtl/top/lingologos_top.sv",
+    "rtl_core": ["rtl/core/rv32e_core.sv", "rtl/core/rv32e_regfile.sv"],
+    "rtl_generated": [
+      "rtl/generated/weight_rom_mesh.sv",
+      "rtl/generated/gf_automaton_1cycle.sv",
+      "rtl/generated/smt_evaluator.sv"
+    ],
+    "generator": "scripts/lingologos_compiler.py",
+    "artifacts": ["artifacts/model_weights.json", "artifacts/gf_rules.json", "artifacts/smt_constraints.json"],
+    "simulation": ["sim/sim_main.cpp", "sim/testbench.sv", "sim/golden_vectors.mem", "sim/core_self_test.mem"],
+    "openlane": ["openlane/config.json", "openlane/lingologos.sdc", "openlane/pin_order.cfg"],
+    "docs": [
+      "doc/datasheet_lingologos.md",
+      "doc/integration_guide.md",
+      "doc/verification_report.md",
+      "doc/build_instructions.md"
+    ]
+  },
+  "artifact_schemas": {
+    "model_weights.json": "lingologos-weight-mesh-1",
+    "gf_rules.json": "lingologos-gf-automaton-1",
+    "smt_constraints.json": "lingologos-smt-clauses-1",
+    "MANIFEST.json": "lingologos-manifest-1"
+  }
+}
