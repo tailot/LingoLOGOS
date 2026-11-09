@@ -7,9 +7,11 @@ Status of this document: **design description, not a characterization report.** 
 number in a table labelled measured was produced by the generator
 `asic_chip/scripts/lingologos_compiler.py` or by the reference interpreter
 `tests/asic_reference_model.py` in this checkout. Every entry in a section headed
-"NOT MEASURED" is a declared design target, and no silicon, no place and route result
-and no static timing report backs it. See `verification_report.md` for the exact list of
-what has been run and what has not.
+"NOT MEASURED" is a declared design target or a tool estimate whose basis is named where it
+appears, and no silicon backs it. One place and route run with its extraction, signoff checks and
+static timing report exists, from 2026-11-09, and this document quotes it only with the period and
+corner it was measured at. See `verification_report.md` for the exact list of what has been run and
+what has not.
 
 ---
 
@@ -53,7 +55,7 @@ pad assignment in section 3 follows the placement intent in
 
 ## 2. Timing
 
-### 2.1 Declared clock target (NOT MEASURED)
+### 2.1 Declared clock target, and what one routed layout measured against it
 
 | Item | Declared value | Basis |
 |---|---|---|
@@ -66,13 +68,42 @@ pad assignment in section 3 follows the placement intent in
 | Driving cell | `sky130_fd_sc_hd__buf_4` on pin X | constraint file |
 | Output load | 0.030 pF, 0.025 pF on the four input lanes | constraint file |
 | `rst_n` | false path to the clock domain | constraint file |
+| Bring-up gate, the period the flow is held to | 32.0 ns, one period, not a product figure | `asic_chip/openlane/config.bringup.json` and `lingologos.bringup.sdc` |
 
-**NOT MEASURED.** No synthesis has been run in this checkout, so there is no worst
-slack, no clock insertion delay, no on-chip variation margin and no maximum attainable
-frequency. 250 MHz on sky130 for a design whose longest combinational cone runs through
-a 4 by 4 multiply-accumulate and a 1020 entry case table is an optimistic target and must
-be treated as unproven until `asic_chip/scripts/build_gds.sh` has actually produced a
-route. Until then this datasheet makes no timing claim about silicon.
+**The 250 MHz target is declared, and it is now known not to be met by the layouts that exist.**
+Synthesis ran on 2026-11-09, as step 06 of the OpenLane 2 flow recorded in
+`asic_chip/doc/verification_report.md`: the netlist mapped into `sky130_fd_sc_hd` holds 11,015
+cells on 10,938 nets, and its standard-cell area is 149,098 square micrometers, 0.149 square
+millimeters. That is a pre-layout figure. The same machine then ran the flow twice more on
+2026-11-09, both times through all 78 steps of the Classic flow, and both runs produced a clock tree,
+a route, a parasitic extraction and a static timing report: one at the 8.0 ns gate in force at the time
+and one at the 30.0 ns gate that replaced it. The numbers those two runs reported are the only timing
+numbers this datasheet can stand behind:
+
+| Corner | Worst setup slack at 8.0 ns | Worst hold slack at 8.0 ns | Worst setup slack at 30.0 ns | Worst hold slack at 30.0 ns |
+|---|---|---|---|---|
+| `nom_tt_025C_1v80` | -4.1255 ns | -0.0431 ns | +14.9556 ns | -0.0585 ns |
+| `max_tt_025C_1v80` | -4.4409 ns, 2,485 violating paths | -0.0532 ns | +14.4003 ns | -0.0989 ns |
+| `min_ss_100C_1v60` | -14.5466 ns | -0.0828 ns | +1.1885 ns | -0.1067 ns |
+| `max_ss_100C_1v60` | -15.7205 ns, total negative slack about -23,845 ns | -0.1700 ns, 41 violating paths | -0.4906 ns, total negative slack -13.5139 ns, 35 violating paths | -0.1540 ns, 10 violating paths |
+| `ff_n40C_1v95`, all three | positive, +0.0880 ns at best | positive | positive, +20.1103 ns at worst | +0.0536 ns at best, -0.0024 ns in `max_ff_n40C_1v95` |
+
+The layout of the second run closes at roughly 12.4 ns in the typical corner and roughly 23.7 ns in the
+slow corner, about 80 MHz and 42 MHz. The layout of the third closes at roughly 15.6 ns and roughly
+30.5 ns, about 64 MHz and 33 MHz. Neither closes at 4.0 ns: that period is about 8.4 ns away from what
+the first layout reached in the typical corner and about 26.5 ns away from what the second one reached in
+the slow corner, the tightest pair in the table. The hold failures were 41 paths in the second run and
+45 violations spread over seven corners in the third, every one of them from an input port to a register
+against the 1.2 to 1.35 ns of clock insertion delay the first clock tree produced and the 2.1845 ns of
+the second, and none register to register. No maximum operating frequency of the part is claimed here:
+what is measured is a worst slack at a stated period and corner, and the 4.0 ns set was never taken
+through place and route. 250 MHz on sky130 for a design whose longest combinational cone runs through a
+4 by 4 multiply-accumulate and a 1020 entry case table was an optimistic target, and on these layouts it
+is a target that was tried and missed. The bring-up gate is now 32.0 ns, above the 30.49 ns the slow
+corner of the third run showed it needed, and both resizers are now asked for 0.40 ns of hold slack
+instead of the 0.05 ns OpenLane defaults to: that run measured hold closed at +0.100201 ns where the
+resizer runs and -0.058548 ns at signoff in the same corner, so detailed routing and extraction took
+about 0.16 ns out of those paths and nothing repairs hold after them.
 
 ### 2.2 Latency of each output, as implemented
 
@@ -273,18 +304,36 @@ and does nothing.
 
 ## 5. Power
 
-**NOT MEASURED.** No synthesis, no placement, no route, no parasitic extraction, no
-switching activity extraction and no IR drop analysis has been run here. The design was
-simulated, and that run wrote a waveform a power tool could read, `asic_chip/sim/lingologos.vcd`
-with 248,815 bytes, but nothing was extracted from it. There is no milliwatt figure this
-datasheet can stand behind, and publishing one would be a fabrication.
+**NOT MEASURED** as a characterized power figure. Synthesis, placement, routing, parasitic
+extraction and a static IR drop analysis ran twice on 2026-11-09, and section 2.5 of
+`asic_chip/doc/verification_report.md` records what they left, but the power numbers they produced are
+estimates under the switching activity model of the tool rather than measured currents. The static
+timing step of each run wrote a power report per corner. At the 8.0 ns gate the `nom_tt_025C_1v80` one
+totalled 1.507948e-01 W, split 7.252268e-02 W internal, 7.827200e-02 W switching and 1.031524e-07 W
+leakage, with 78.5 percent of it in combinational logic and 7.6 percent in the clock. At the 30.0 ns
+gate the same corner totals 3.926652e-02 W, split 1.688897e-02 W internal, 2.237745e-02 W switching and
+9.765576e-08 W leakage, with 77.2 percent combinational, 14.4 percent sequential and 8.4 percent clock.
+The ratio between the two totals, 0.26, is close to the 8 over 30 = 0.27 that the longer period
+predicts for a switching dominated estimate, but the two runs routed different layouts, so the pair is
+not a clean measurement of frequency scaling either. Neither report had an SDF back-annotation or a
+value change dump behind it: the activity in both is the default model of the tool and not the vectors
+of section 5.2, and the figures are quoted as what a tool printed at a stated period, not as a figure
+the part consumes. The two runs also reported a static IR drop: 0.0135214 V worst on VPWR, leaving
+1.78648 V, and 0.00820593 V worst on VGND at the 8.0 ns gate; 0.00336923 V worst on VPWR, leaving
+1.79663 V, and 0.00378131 V worst on VGND at the 30.0 ns gate. The design was simulated, and that run
+wrote a waveform a power tool could read, `asic_chip/sim/lingologos.vcd` with 248,815 bytes, but nothing
+was extracted from it. There is no milliwatt figure this datasheet stands behind as a rating, and
+publishing one would be a fabrication.
 
-### 5.1 Method that will be used once the flow has run
+### 5.1 Method that will be used once the flow is complete
 
-The report will come from the OpenLane run: the synthesis reports give estimate area and
-wire length, `cvc` gives the ERC and IR drop check declared in
-`asic_chip/openlane/config.json`, and power will be taken from an SDF annotated timing
-back-annotation plus a value change dump activity file at the declared operating point.
+The report will come from an OpenLane run that closes signoff. `asic_chip/openlane/config.json`
+used to declare a `cvc` ERC and IR drop check under `RUN_CVC`; OpenLane 2.3.10 has removed that
+step, the key is reported as an unknown key and the configuration no longer carries it. What the
+flow does give today is the static analysis of the `openroad-irdropreport` step of a run, the
+per-corner `power.rpt` of the static timing step, and the area and wire length reports of the placement
+and routing steps. Power at a stated activity will be taken from an SDF annotated timing back-annotation
+plus a value change dump activity file at the declared operating point, which has not been done.
 
 ### 5.2 Measured stimulus statistics available today
 
@@ -313,16 +362,36 @@ describe a near worst-case toggle environment rather than an application profile
 | Standby current | not characterized | NOT MEASURED |
 
 Any absolute maximum rating for a sky130 part must come from the PDK device tables and
-from a completed run; the PDK is not installed in this checkout.
+from a completed run. The PDK is installed on the machine that runs the flow, sky130A
+version `0fe599b2afb6708d281543108caf8310912f54af` in the volare tree and `c6d73a35f524070e85faff4a6a9eef49553ebc2b`
+under `~/pdk`, and no characterization of the part against those tables has been done.
 
 ---
 
 ## 6. Area
 
-**NOT MEASURED.** `asic_chip/openlane/config.json` declares `FP_CORE_UTIL 45`,
-`PL_TARGET_DENSITY 0.50` and `SYNTH_STRATEGY "AREA 0"`, and the die frame implied by a
-QFN-160 package is a packaging choice, not a layout result. No standard cell count, no
-core area and no utilization figure exists in this checkout.
+**Measured for the two layouts that exist, neither of which closed signoff.** `asic_chip/openlane/config.json`
+declares `FP_CORE_UTIL 40` and `PL_TARGET_DENSITY 0.45`, and the die frame implied by a QFN-160
+package is a packaging choice, not a layout result. Both runs of 2026-11-09 that went through all 78
+steps of the OpenLane 2 Classic flow left these figures, from the fill insertion report recorded in
+`asic_chip/doc/verification_report.md`. The run at the 8.0 ns gate: a die area of 350,447 square
+micrometers, a core area of 330,268 square micrometers, 169,306 square micrometers of standard-cell area
+inside it, a core utilization of 0.512633, 17,552 instances and 148 I/O pins. The run at the 30.0 ns
+gate: die 393,012, core 371,917, standard-cell area 204,806, core utilization 0.550678, 34,149
+instances, 148 I/O pins, and 660,126 micrometers of routed wire over 134,302 vias on 11,718 nets, which
+the first run never reported as a total. Before placement the mapped netlist of step 06 held 11,015
+cells on 10,938 nets over 149,098 square micrometers of cell area, which counts the constant logic
+synthesis made out of the program memory. The difference between 11,015 cells and the 17,552 instances
+of the first run is what that flow added: 20,266 fill cells, 4,686 tap cells, 468 diodes inserted for
+antenna repair, 726 timing repair buffers, 361 clock buffers and 219 clock inverters. The same classes
+in the second layout, read from the metrics of its fill insertion step, are 21,734 fill, 5,311 tap,
+16,898 instances of class `antenna_cell`, 325 timing repair buffers, 373 clock buffers and 227 clock
+inverters. That antenna figure is the price of the check the first run failed, and it is the main reason
+the die grew 12 percent between the two. The longest routed net of the first run measured 1,529.65
+micrometers. None of this is a finished part: the first run reported antenna violations and the timing
+figures of section 2.1 and exited non zero on them, and the second passed the antenna check, with
+`Antenna Passed`, `LVS Passed` and `DRC Passed` in its own manufacturability report, and still exited
+non zero on setup in one corner and hold in seven.
 
 A structural note that is not a measurement either: the program memory is emitted as a
 128 by 32 bit read only array and synthesis turns it into constant logic. A production
@@ -340,7 +409,7 @@ records under `NOTE_ROM`.
 | L2 | an independent reference model reproduces every generated expectation | yes, 304 vector rows and the 17 key and value pairs of the core self test recomputed |
 | L3 | RTL semantics reproduce the reference model | yes, by the Python interpreter and by the Verilator run of section 2.4 of `verification_report.md`, which reproduces every column of every row |
 | L4 | Verilator runs the C++ harness and the SystemVerilog testbench | yes, in the container image `verilator/verilator:latest`, Verilator 5.054: lint clean under `-Wall`, 304 rows plus the core self test with 0 mismatches in both paths. NOT RUN on the host, NOT RUN with Icarus |
-| L5 | synthesis, floorplan, placement, route, DRC, LVS, STA | not run, OpenLane and sky130A not installed |
+| L5 | synthesis, floorplan, placement, route, DRC, LVS, STA | partly, on 2026-11-09: two OpenLane 2 runs went through all 78 steps of the Classic flow, each produced a GDSII, and both passed DRC with zero violations in Magic and KLayout and LVS with a unique circuit match. The second also reported `Antenna Passed`, the check the first one failed with 54 pins over 46 nets. Both reported setup and hold violations, the first at the 8.0 ns gate and the second at the 30.0 ns gate, which made the flow exit non zero both times. STA at the declared 4.0 ns has never been run. Details in section 2.5 of `verification_report.md` |
 
 Full details in `verification_report.md`.
 

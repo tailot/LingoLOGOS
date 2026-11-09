@@ -446,28 +446,55 @@ the bound out of `sim_main.cpp` and asserts that the measured cycle count stays 
 
 `asic_chip/openlane/config.json` is written for OpenLane 1 with the sky130A PDK: design
 name `lingologos_top`, the generated modules plus the core and the top as the source list,
-`CLOCK_PORT clk`, `CLOCK_PERIOD 4.0`, `FP_PIN_ORDER_CFG` pointing at `pin_order.cfg`, and
-`QUIT_ON_TIMING_VIOLATIONS` left true so a run that misses 250 MHz stops instead of
-silently shipping.
+`CLOCK_PORT clk`, `CLOCK_PERIOD 4.0`, `FP_PIN_ORDER_CFG` pointing at `pin_order.cfg`, and the
+antenna and timing gate knobs written under the names OpenLane 2 reads. Beside it sit
+`config.bringup.json` and `lingologos.bringup.sdc`, the same configuration at a 32.0 ns period and with
+both resizer hold slack margins, `PL_RESIZER_HOLD_SLACK_MARGIN` and `GRT_RESIZER_HOLD_SLACK_MARGIN`, at
+0.40 ns instead of the installed 0.10 and 0.05. The entry point runs the bring-up pair by default so
+that a route produces a layout and a measured slack rather than stopping at the declared budget: two end
+to end runs measured the gap. At the 8.0 ns gate the first missed setup by 4.4409 ns in the worst
+typical corner and by 15.7205 ns in the worst slow one; at the 30.0 ns gate the second closed every
+corner except 0.4906 ns of setup in the slow corner, and lost hold on input paths by up to 0.1540 ns.
+The gate is now above both gaps, and those margins are what the second run measured routing and
+extraction to be worth. `LL_OPENLANE_CONFIG=config.json` routes
+at the declared 250 MHz budget instead, and nothing has ever been routed against it. An integrator
+reading a report has to check which of the two configurations produced it, and which corner: what
+turns a slack into a failure is the corner list `SETUP_VIOLATION_CORNERS` and
+`HOLD_VIOLATION_CORNERS`, both set to every corner in both files here, while OpenLane's own default
+for a sky130 PDK is the typical corner only.
 
-`asic_chip/scripts/build_gds.sh` runs the generator with `--check` before touching the
-layout flow, and exits 127 with an explicit message when neither OpenLane 1 nor OpenLane 2
-is installed. Read that message as the honest answer: as of this checkout, no place and
-route has been run for this design.
+`asic_chip/scripts/build_gds.sh` runs the generator with `--check` before touching the layout flow,
+and exits 127 with an explicit message when neither OpenLane 1 nor OpenLane 2 is reachable. When a
+flow did run, the script prints the newest run directory, the GDSII files below it and the reports
+that name each signoff check, and returns the exit status of the flow rather than the status of its
+own last command. Two place and routes have been run for this design, on 2026-11-09, and both
+returned non zero: deferred setup and hold violations are reported after the GDSII, the DRC reports and
+the LVS report have been written, and in the first of the two the antenna check failed as well. Section
+2.5 of `asic_chip/doc/verification_report.md` lists what those runs measured and what they leave open.
 
 For a production hardening pass, the items that need attention before any timing or power
-claim can be written into the datasheet: the ROM macro replacement, an assessment of the
-1020 arm case table (it synthesizes into a PLA-like structure and is the most likely
-critical path), the reset false path that needs to become a real checked path, and the
-absence of an I/O characterization.
+claim can be written into the datasheet: a route that closes, meaning an antenna check that
+passes, which the run at the 8.0 ns gate failed on 54 pins and 46 nets and the run at the 30.0 ns
+gate passed, and a signoff with zero setup and hold violations at the period that is meant to be
+quoted; the ROM macro
+replacement, an assessment of the 1020 arm case table (it synthesizes into a PLA-like
+structure and is the most likely critical path, and the worst setup path of both routed
+layouts does run through the `core_pc` cone), the reset false path that needs to become a real
+checked path, and the absence of an I/O characterization.
 
 ---
 
 ## 11. What an integrator must not assume today
 
-1. No maximum frequency claim: no static timing analysis has been run, so 250 MHz is a
-   design target, not a rating.
-2. No power, area, ESD, latch-up or pad drive claim: nothing has been measured or extracted.
+1. No maximum frequency claim. Static timing has been run twice, on routed layouts and over nine
+   corners. At the 8.0 ns bring-up period of the first run it reported 15,089 setup violating paths and
+   41 hold violating paths; at the 30.0 ns gate of the second, 35 setup violating paths in one corner and
+   45 hold violations spread over seven corners. The declared 250 MHz budget has never been routed at
+   all, and a slack at a stated period is not a rating.
+2. No power, ESD, latch-up or pad drive claim. Area, utilization, wire length, DRC, LVS, IR drop and
+   a per corner power estimate exist from two runs, each labeled with the period and corner it
+   came from and with the activity model of the tool behind the power figure; nothing has been
+   characterized, and there are no pads to have a drive or latch-up figure for.
 3. No radiation, temperature or voltage corner behavior.
 4. The pin table in the datasheet is generated from the RTL port list and the placement
    intent file; it is not a package ballout from a foundry.

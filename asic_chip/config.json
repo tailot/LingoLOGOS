@@ -6,6 +6,8 @@
   "clock_port": "clk",
   "clock_mhz": 250,
   "clock_period_ns": 4.0,
+  "bringup_clock_period_ns": 32.0,
+  "timing_note": "clock_period_ns is the declared specification budget, 4.0 ns for 250 MHz, and static timing says this layout does not come close. Two complete place and route runs on 2026-11-09 bound it: at the then 8.0 ns bring-up gate worst setup slack was -4.4409 ns in max_tt_025C_1v80 and -15.7205 ns in max_ss_100C_1v60, a first-order minimum period near 12.4 ns typical and 23.7 ns slow, and at a 30.0 ns gate, in RUN_2026-11-09_21-14-43, the slow corner came to -0.4906 ns while the eight other corners came out positive, so that layout needed 30.49 ns. bringup_clock_period_ns is 32.0 ns, that measured figure plus room for the rerouting a period change causes, so the next end to end run has a period it can close at all nine corners; OpenLane 2.3.10 fails the flow on the corners matched by SETUP_VIOLATION_CORNERS and HOLD_VIOLATION_CORNERS, and both are set to all corners in the constraint files. That run came out clean on the physical checks, Antenna Passed, LVS Passed and DRC Passed, and still exited non zero on the deferred setup and hold errors, with 10 [hold in-reg] violating paths in the slow corner, so hold is the open item and PL_RESIZER_HOLD_SLACK_MARGIN and GRT_RESIZER_HOLD_SLACK_MARGIN are set to 0.40 ns to make the resizer overfix it. The two sets are asic_chip/openlane/config.json with lingologos.sdc, still at 4.0 ns and never run, and asic_chip/openlane/config.bringup.json with lingologos.bringup.sdc. Nothing in this repository claims a measured maximum frequency for a closed layout.",
   "package": {
     "name": "QFN-160, 0.4 mm pitch, 9 x 9 mm, exposed thermal pad",
     "signal_pins": 146,
@@ -58,7 +60,7 @@
     "generator": "scripts/lingologos_compiler.py",
     "artifacts": ["artifacts/model_weights.json", "artifacts/gf_rules.json", "artifacts/smt_constraints.json"],
     "simulation": ["sim/sim_main.cpp", "sim/testbench.sv", "sim/golden_vectors.mem", "sim/core_self_test.mem"],
-    "openlane": ["openlane/config.json", "openlane/lingologos.sdc", "openlane/pin_order.cfg"],
+    "openlane": ["openlane/config.json", "openlane/config.bringup.json", "openlane/lingologos.sdc", "openlane/lingologos.bringup.sdc", "openlane/pin_order.cfg"],
     "docs": [
       "doc/datasheet_lingologos.md",
       "doc/integration_guide.md",

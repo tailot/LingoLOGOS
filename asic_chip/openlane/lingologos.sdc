@@ -3,9 +3,13 @@
 #
 # The specification clock budget is 250 MHz, so T_clk is 4.0 ns. This file states
 # that budget and the input and output budgets that go with it. It does not claim
-# that the design meets it: no static timing analysis has been run in this checkout,
-# and 250 MHz on sky130_fd_sc_hd is optimistic for this RTL. See
-# asic_chip/doc/verification_report.md for what is and is not measured.
+# that the design meets it, and since 2026-11-09 that disclaimer has a measurement
+# behind it: the first complete place and route run of this RTL, constrained to the
+# bring-up period, measured worst setup slack -4.4409 ns in max_tt_025C_1v80 and
+# -15.7205 ns in max_ss_100C_1v60, so that layout needs about 12.4 ns in the typical
+# corner and about 23.7 ns in the slow one. 4.0 ns is therefore a budget this checkout
+# has measured against and not met, and this set has never itself been routed. See
+# asic_chip/doc/verification_report.md for the measured table.
 # -----------------------------------------------------------------------------
 
 # Clock: 250 MHz period, single source at the pad.

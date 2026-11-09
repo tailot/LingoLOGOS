@@ -205,10 +205,10 @@ documentation cannot drift away from the code). Its contract:
 │   ├── config.json                  # Public ports, datapath limits, package and path declarations
 │   ├── doc/                         # Datasheet, integration guide, verification report, build instructions
 │   ├── env.sh                       # POSIX environment for the container flow
-│   ├── Makefile                     # gen check sim-verilator sim-tb sim-iverilog lint pytest openlane clean
-│   ├── openlane/                    # SkyWater sky130A config, SDC with the 4.0 ns budget, pin plan
+│   ├── Makefile                     # gen check sim-verilator sim-tb sim-iverilog lint pytest openlane openlane-spec setup-openlane clean
+│   ├── openlane/                    # SkyWater sky130A configs, 4.0 ns spec and 32.0 ns bring-up, pin plan
 │   ├── rtl/                         # Generated mesh, GF automaton and clause netlist, RV32E core, top level
-│   ├── scripts/                     # lingologos_compiler.py and the OpenLane entry point
+│   ├── scripts/                     # lingologos_compiler.py, the OpenLane entry point, and the one command automatic setup (sh plus ps1)
 │   └── sim/                         # C++ harness, SystemVerilog testbench, golden vectors, core self test
 ├── doc/
 │   └── TECHNICAL_DOCUMENTATION.md # Comprehensive engineering and mathematical docs
@@ -303,7 +303,7 @@ $$A \to a:\ \delta = e(a),\ m = e(a) \qquad A \to B\,C:\ \delta = \delta_B + \de
 | **Selectivity (negative controls)** | `verify_negative_controls` | 100% rejection of 200 non-Dyck strings | **PASS (200/200)** |
 | **Rule induction quality** | `gold_rule_f1` | $F_1 \ge 0.90$ under NT alignment | **PASS (1.000)** |
 | **Language inclusion** | Z3 SMT Solver | **UNSAT** on certificate $+ \neg G$ | **PASS (UNSAT)** |
-| **Unit / integration tests** | pytest | All tests PASSED | **PASS (181 passed)** |
+| **Unit / integration tests** | pytest | All tests PASSED | **PASS (184 passed)** |
 
 ---
 
@@ -319,7 +319,7 @@ $$A \to a:\ \delta = e(a),\ m = e(a) \qquad A \to B\,C:\ \delta = \delta_B + \de
 - Safetensors (`safetensors`), the release format of the pure-model weights
 - pytest (`pytest`)
 
-The ASIC track of section 12 needs nothing beyond CPython and pytest for generation and gates. Verilator 5.006 or later, Icarus Verilog 11 or later, Yosys 0.38 or later and OpenLane 1 or 2 with the SkyWater `sky130A` PDK are external programs, not Python packages, and none of them is installed on the host this tree was written on. Verilator 5.054 ran from the image `verilator/verilator:latest`, which is how the lint and both simulation paths of section 12.3 were executed; Icarus, Yosys and OpenLane were never run. `asic_chip/doc/build_instructions.md` says what to install and how to run the same commands in that image, and `asic_chip/doc/verification_report.md` says what that leaves unverified.
+The ASIC track of section 12 needs nothing beyond CPython and pytest for generation and gates. Verilator 5.006 or later, Icarus Verilog 11 or later, Yosys 0.38 or later and OpenLane 1 or 2 with the SkyWater `sky130A` PDK are external programs, not Python packages, and none of them is committed to this tree. Verilator 5.054 ran from the image `verilator/verilator:latest`, which is how the lint and both simulation paths of section 12.3 were executed; OpenLane 2.3.10 ran the full place and route in WSL Ubuntu on 2026-11-09, with the sky130A PDK downloaded by volare and the tools taken from the image `ghcr.io/efabless/openlane2:2.3.10`, and Yosys ran inside that flow as its synthesis step; Icarus Verilog has never run here. `asic_chip/doc/build_instructions.md` says what to install and how to run the same commands in that image, and `asic_chip/doc/verification_report.md` says what that leaves unverified.
 
 Install dependencies:
 ```bash
@@ -366,11 +366,11 @@ pytest -v tests/
 ```
 The suite also carries the gates of the ASIC track described in section 12: `tests/test_asic_compiler.py`
 recomputes every numeric claim in `asic_chip/` from the committed files and
-`tests/test_asic_core_firmware.py` emulates the core firmware, so 181 tests pass in this
+`tests/test_asic_core_firmware.py` emulates the core firmware, so 184 tests pass in this
 checkout with no HDL tool on the host. The ASIC steps that do need an external tool are
 documented in `asic_chip/doc/build_instructions.md`: Verilator 5.054 linted and simulated the
-design inside the image `verilator/verilator:latest`, while Icarus Verilog and OpenLane were
-never run.
+design inside the image `verilator/verilator:latest`, OpenLane 2.3.10 with the sky130A PDK ran
+two complete place and routes in WSL Ubuntu, and Icarus Verilog has never run here.
 
 ### Continuous Integration (GitHub Actions)
 Tests and formal verification run automatically on push or pull requests via `.github/workflows/ci.yml` across Python **3.10**, **3.11**, and **3.12**.
@@ -658,8 +658,8 @@ refuses to start a place and route until `--check` passes, which is what keeps a
 
 ### 12.3 Verification status, executed against not run
 
-`python -m pytest -v tests/` in this checkout: **181 passed**, zero failures, zero errors.
-Twenty three of those tests target the ASIC tree: seventeen in `tests/test_asic_compiler.py`
+`python -m pytest -v tests/` in this checkout: **184 passed**, zero failures, zero errors.
+Twenty six of those tests target the ASIC tree: twenty in `tests/test_asic_compiler.py`
 and six in `tests/test_asic_core_firmware.py`, plus the helper model in
 `tests/asic_reference_model.py` that recomputes the dot product, the GF field, the clause
 masks and the RV32E semantics without importing the generator.
@@ -669,9 +669,9 @@ masks and the RV32E semantics without importing the generator.
 | L0 to L3 | artifact validity, generator gates H1 to H5, agreement of two independent models on every vector row and every input byte, byte level reproducibility and digests | EXECUTED by CPython 3.14.5 and pytest 9.1.1 |
 | Core behavior | the 97 word firmware emulated by the reference model: 89 cycles, 4 coprocessor accesses, one illegal `x16` probe at ROM slot 79, final registers `x8=0x00000009`, `x10=0x00000002`, `x11=0x0000104A`, `x13=0x00000013` | CROSS-CHECKED by emulation, and confirmed by simulation: both paths below assert the same readback, and the harness measures 91 cycles for the same run |
 | L4 | Verilator lint, the C++ harness over the 304 golden rows, the SystemVerilog testbench, Icarus | EXECUTED in the container image `verilator/verilator:latest` with Verilator 5.054: lint clean under `-Wall`, and both the harness and the testbench reporting `checked 304 vector rows plus the core self-test, 0 mismatches` and `FINAL VERDICT: PASS`, through the make targets of `asic_chip/Makefile`. NOT RUN on the host, NOT RUN with Icarus |
-| L5 | synthesis, static timing at the declared 4.0 ns budget, power, area, GDSII, DRC and LVS | NOT RUN and NOT MEASURED, no OpenLane and no PDK in this checkout |
+| L5 | synthesis, floorplan, placement, route, DRC, LVS, static timing, power, area, GDSII | Partly EXECUTED on 2026-11-09, in WSL Ubuntu with openlane 2.3.10 and the sky130A PDK: two runs went through all 78 steps of the Classic flow, in 16 min 59 s and in 12 min 12 s, each wrote three GDSII files, and both passed DRC with zero violations in Magic and in KLayout and LVS with `Circuits match uniquely`, each with area, utilization, IR drop and static timing over nine corners. The second reported `Antenna Passed`, which the first failed on 54 pins and 46 nets. Both exited non zero on deferred setup and hold violations at the bring-up period each was constrained to, 8.0 ns and 30.0 ns. Static timing at the declared 4.0 ns budget has never been run, and no frequency is claimed |
 
-The verification layer found real things, and the report names all sixteen of them. The
+The verification layer found real things, and the report names all twenty three of them. The
 Python gates caught the reference model using the wrong boolean identity for `MUX`, a stale
 artifact digest and the wrong combinational depth in the datasheet, generated files written
 with platform line endings, and switching activity figures that did not match the committed
@@ -682,14 +682,28 @@ port at the top level. The two simulation paths caught a testbench that was chec
 vector rows instead of 304, a checker that sampled the registered outputs one delta too
 early, and a coprocessor counter expectation that was off by one in both checkers. All of it
 is fixed: the cases the Python gates found have a test that fails if they return, and the
-others stop the lint or the build of the same flow. Read
+others stop the lint or the build of the same flow. Running the place and route then found
+three more, all of them in this tree's own configuration: a pin plan file written in a syntax
+the placement parser rejects, which stopped the first run at step 25 of 78; three timing and
+signoff keys that the installed OpenLane does not read at all, so the thing they appeared to
+gate was gated by nothing; and a legacy diode strategy key that silently overwrote the antenna
+knobs written next to it, which is one reason the antenna check still failed at the end of the
+run that got through everything else. All three are corrected in the configuration files, and
+`tests/test_asic_compiler.py` fails if any of them comes back. The rerun with those knobs written the
+way OpenLane 2 reads them, at a 30.0 ns gate, passed the antenna check and both rule checks, with
+`Antenna Passed`, `LVS Passed` and `DRC Passed` in its manufacturability report, and still exited non
+zero: setup in one of nine corners at -0.4906 ns, and hold in seven corners at a worst -0.1540 ns, every
+violating path from an input port to a register. The gate is 32.0 ns now and both resizers are asked for
+0.40 ns of hold slack instead of the 0.05 and 0.10 ns OpenLane defaults to, because that run measured
+hold repaired at +0.100201 ns and lost about 0.16 ns of it to detailed routing and extraction; that
+attempt has not run yet. Read
 `asic_chip/doc/verification_report.md` before repeating any claim from the datasheet.
 
 ### 12.4 Documents
 
 | Document | Content |
 |---|---|
-| `asic_chip/doc/datasheet_lingologos.md` | pinout for the declared QFN-160 body, port table, per block measured properties, stimulus statistics, the declared operating point with every electrical cell marked NOT MEASURED, and the pointer to the report that will replace them |
+| `asic_chip/doc/datasheet_lingologos.md` | pinout for the declared QFN-160 body, port table, per block measured properties, stimulus statistics, the declared operating point with each electrical cell either marked NOT MEASURED or labeled with the run, period and corner a measured figure came from, and the pointer to the report behind each |
 | `asic_chip/doc/integration_guide.md` | how to drive the chip: reset and start protocol, the `gf_symbol_in` hazard and how to avoid it, the implemented RV32E subset as the decoder sees it, the firmware map, the coprocessor window, the four places to change together when the pin plan moves, and the deviation table |
 | `asic_chip/doc/verification_report.md` | what ran, what did not, tool inventory, gate by gate results, defects caught, and what a reviewer still has to do |
 | `asic_chip/doc/build_instructions.md` | prerequisites with versions, every command for generation, pytest, Verilator, Icarus and OpenLane, make target table, platform notes, troubleshooting |
@@ -697,4 +711,7 @@ others stop the lint or the build of the same flow. Read
 No new third party dependency enters the project for this track: the generator uses only the
 Python standard library, and the gate suite needs the `pytest` already declared in
 `requirements.txt` and `pyproject.toml`. Verilator, Icarus, Yosys and OpenLane are external
-tools the build instructions describe and this checkout does not have.
+tools the build instructions describe and that this checkout does not carry; the OpenLane runs
+above happened in WSL Ubuntu, in its own virtual environment, pulling its tools from a container
+image and its PDK from a download outside this tree. Each of those runs left its own directory under
+`asic_chip/openlane/runs/` in the tree it ran from, and none of those directories is committed.

@@ -378,11 +378,55 @@ instruction semantics from an independent model. Verilator 5.054, run from the i
 `verilator/verilator:latest`, linted the design clean under `-Wall` and replayed all 304
 golden rows plus the core self test in two independent paths, 0 mismatches, and along the way
 it reported defects in the RTL and in the checkers, items 7 to 16 of section 4 of the report,
-all fixed. No place and route, no synthesis, no
-static timing and no second simulator have been run anywhere, so no timing, power or area
-number exists, and the 4.0 ns clock period in the SDC is a declared budget rather than a met
-result. `asic_chip/doc/verification_report.md` separates executed from declared claim by
-claim.
+all fixed. The first place and route attempt, on 2026-11-09, reached the 25th step of the
+OpenLane 2 Classic flow: Yosys mapped the design into `sky130_fd_sc_hd` at 11,015 cells on
+10,938 nets and 149,098 square micrometers of cell area, the lint, the checkers, the floorplan,
+the tap and cap rows, the power distribution network, the global placement and the pin placement
+completed, and the step that places the pins from `openlane/pin_order.cfg` stopped the run on a
+file written in the format of OpenLane 1. That step reads the file with a grammar of its own,
+which has no comment token and matches anchored regular expressions against the bit level names
+of the netlist, and section 5 of `asic_chip/doc/build_instructions.md` now records that grammar
+and the rewritten file. After that file was rewritten, the same command ran all 78 steps of the
+same flow twice more on the same day, in 16 min 59 s and in 12 min 12 s, and both produced a layout:
+three GDSII files, a DRC report at zero violations in Magic and in KLayout, an LVS report reading
+`Final result: Circuits match uniquely.`, a static IR drop report, and a static timing report over nine
+corners. The first of those two, at the 8.0 ns bring-up period then in force, left a signoff summary
+line saying `Antenna Failed` on 54 pins and 46 nets, and worst setup slack of -4.4409 ns in the typical
+corner and -15.7205 ns in the slow one. The second, at a 30.0 ns gate, is the run whose manufacturability
+report reads `Antenna Passed`, `LVS Passed` and `DRC Passed`; it still exited non zero, on setup in one
+corner at -0.4906 ns in `max_ss_100C_1v60` and on hold in seven corners at a worst -0.1540 ns, every
+violating path from an input port to a register. The hold side of that second run is what moved two
+resizer margins: the resizer closed hold at +0.100201 ns in `nom_tt_025C_1v80` and the same corner read
+-0.058548 ns at signoff, because detailed routing and extraction took about 0.16 ns out of those paths
+and the Classic flow repairs hold nothing after them. No second simulator has been run, no run here has
+closed signoff, and no maximum operating frequency is
+claimed anywhere in this tree: the 4.0 ns clock period in the SDC is a declared budget, and what is
+measured is the slack a layout produced at a stated period and corner. The section 5 script runs a
+second, deliberately looser constraint set by default, 32.0 ns in `config.bringup.json` and
+`lingologos.bringup.sdc` with `PL_RESIZER_HOLD_SLACK_MARGIN` and `GRT_RESIZER_HOLD_SLACK_MARGIN` at
+0.40 ns, selected against the declared one with `LL_OPENLANE_CONFIG`, and a one
+command setup script installs the toolchain that makes any of that runnable. Three things those
+complete runs taught about the configuration files, and all three are corrected in them: `PNR_SDC_FILE` and
+`SIGNOFF_SDC_FILE` were undefined, which sends the placement and routing steps to a generic
+constraint file instead of this design's, and both files now name the design constraint file under
+those keys; `QUIT_ON_TIMING_VIOLATIONS` and `RUN_CVC` are keys OpenLane 2.3.10 does not read at all,
+so they never gated anything and are gone, while what does gate timing is the corner list, and both
+files now set `SETUP_VIOLATION_CORNERS` and `HOLD_VIOLATION_CORNERS` to every corner instead of
+inheriting the `["*tt*"]` that the PDK compatibility layer installs; and the OpenLane 1
+`DIODE_INSERTION_STRATEGY` key is accepted, deleted and recompiled into the native antenna knobs,
+which for the value 3 these files carried disabled the heuristic diode insertion and the diodes on
+ports the same files asked for, so the native knobs are written directly now. That script also selects the interpreter the toolchain is installed on, 3.12 at
+best, because the published wheel sets of the two compiled dependencies of the `openlane` package
+stop at cp313 for `klayout` 0.29.12 and at cp312 for `libparse` 0.3.1, and both source
+distributions failed to compile here. When the package manager cannot provide such an interpreter
+the script obtains one itself, first from the archive Ubuntu defers to for older Pythons and then
+as a standalone build under `~/.local/share/lingologos`. That interpreter is also required to
+import `tkinter`, which the `openlane` package imports while starting up and which Debian and
+Ubuntu package apart from the interpreter. The flow entry point then looks for the installed
+`openlane` in `LL_OPENLANE_BIN`, in `~/openlane-venv/bin` and on `PATH`, in that order, and invokes
+one it finds in that virtual environment with `--dockerized`, because the package brings no tools
+of its own and the container image does. `asic_chip/doc/verification_report.md`
+separates executed from declared claim by claim.
 
 ---
 
@@ -403,9 +447,11 @@ claim.
   nowhere else, so building a release folder needs no Hub package and no network access.
 - The `asic_chip/` track of section 1.10 adds no dependency at all: its generator uses only the Python
   standard library and its gates run inside `pytest`. The tools that would take it further, Verilator,
-  Icarus Verilog, Yosys and OpenLane with the sky130A PDK, are external programs, not packages, and none
-  of them is installed in the checkout where this track was written. Section 2.5 gives the commands and
-  marks what was actually run.
+  Icarus Verilog, Yosys and the sky130A PDK, are external programs and none is installed in the
+  checkout where this track was written. OpenLane is the exception in form: `pip install openlane`
+  gets version 2, which drives the tools of every step inside containers, and its compiled
+  dependencies limit the interpreter of that environment to 3.12 or older on this platform. None of
+  them is installed here. Section 2.5 gives the commands and marks what was actually run.
 
 Installation:
 ```bash
@@ -489,18 +535,27 @@ in `asic_chip/Makefile` and in `sim/sim_main.cpp` are relative to it.
 | --- | --- | --- | --- |
 | regenerate the generated RTL, both vector tables and the manifest | `python asic_chip/scripts/lingologos_compiler.py` | CPython, standard library only | EXECUTED, `FINAL VERDICT: PASS` |
 | prove the checked in files are the current ones | `python asic_chip/scripts/lingologos_compiler.py --check` | same | EXECUTED, adds the `RTL_matches_artifacts` gate |
-| run the gate suite required by `AGENTS.md` | `pytest -v tests/` | pytest | EXECUTED, 181 passed |
+| run the gate suite required by `AGENTS.md` | `pytest -v tests/` | pytest | EXECUTED, 184 passed |
 | lint and infer latches | `verilator --lint-only ... -DLL_DEBUG_PORTS --top-module lingologos_top` | Verilator 5.006 or later | EXECUTED in the image `verilator/verilator:latest`, Verilator 5.054, through `make -f asic_chip/Makefile lint`: exit 0, no warning left. NOT RUN on the host, where there is no Verilator and no `make` |
 | replay the 304 golden rows against Verilog | `verilator --cc --exe --build ... sim/sim_main.cpp` | Verilator and a C++ compiler | EXECUTED in that image, through `make -f asic_chip/Makefile sim-verilator`: 304 rows plus the core self test, 0 mismatches, `FINAL VERDICT: PASS`, 91 clock cycles for the self test, VCD written |
 | run the SystemVerilog testbench | `verilator --binary --timing ...` | Verilator | EXECUTED in that image, through `make -f asic_chip/Makefile sim-tb`: same checks, same verdict |
 | run the testbench in a second simulator | `iverilog -g2012` plus `vvp` | Icarus Verilog | NOT RUN, Icarus is not installed |
-| place and route | `sh asic_chip/scripts/build_gds.sh` | OpenLane 1 or 2 plus the sky130A PDK | NOT RUN, the script reports that neither `flow.tcl` nor `openlane` is on `PATH` and exits 127 |
+| place and route, first attempt | `sh asic_chip/scripts/build_gds.sh` | OpenLane 2.3.10 plus the sky130A PDK | EXECUTED in WSL Ubuntu with Docker Desktop, 24 of 78 steps, stopped at the custom I/O placement step on `pin_order.cfg`, exit 65 |
+| place and route, second attempt of the same day | the same script, after the pin plan file was rewritten | the same | EXECUTED end to end, all 78 steps in 16 min 59 s: three GDSII files, DRC zero in Magic and KLayout, LVS circuits match uniquely, IR drop and nine corner static timing reports, `Antenna Failed` on 54 pins and 46 nets, exit non zero on deferred setup and hold violations at the 8.0 ns gate of that run |
+| place and route, third attempt of the same day | the same script, with the antenna knobs written natively and the bring-up period at 30.0 ns | the same | EXECUTED end to end, all 78 steps in 12 min 12 s: three GDSII files, DRC zero in Magic and KLayout, LVS circuits match uniquely, and a manufacturability report reading `Antenna Passed`, `LVS Passed` and `DRC Passed`; exit non zero on deferred setup violations in one corner at -0.4906 ns and hold violations in seven corners at a worst -0.1540 ns, all of them input port to register |
 
 The three Verilator rows ran in the official container image with the checkout mounted at
 `/work`, the route `asic_chip/doc/build_instructions.md` documents for a host that has no
 Verilator: that image carries its own `make` and a C++ compiler, so the make targets work
 there unchanged. Section 2.4 of `asic_chip/doc/verification_report.md` quotes the output those
 runs produced, and section 1 of the same report lists which tools were present where.
+The three place and route rows ran in WSL Ubuntu 26.04 with Docker Desktop, from the copy of this
+tree that the setup script writes under `/home/<user>/LingoLOGOS`, with openlane 2.3.10 on the host
+inside `~/openlane-venv` and its steps executed in the image
+`ghcr.io/efabless/openlane2:2.3.10`; section 2.5 of the same report gives the three run directory
+names and the reports each run left. The numbering of the steps inside a run directory changes
+between runs, because the configuration enables steps, so the reports are named by step kind and not
+by number.
 
 The generator refuses to emit RTL when one of its own gates fails: `H1` the shift-add trees fit
 the 20 bit accumulator, `H2` the field table is closed and irreducible, `H3` the clause network
@@ -697,13 +752,13 @@ To maintain high engineering and academic standards:
 3. **Certificate incompleteness.** The per-non-terminal signature proves soundness but is not complete (`INCONCLUSIVE` is possible); witness search is bounded by `--search-bound`.
 4. **Model class.** A CNF PCFG with $K$ latent symbols cannot represent languages whose CNF needs more symbols, and the inside objective does not encourage disambiguation: several grammars fit the corpus, and only the extracted one is verified.
 5. **No bit-exact reproducibility.** No global `torch` seed or deterministic algorithm setting is enforced inside the library; only `synthesize.py` seeds `random`/`torch`, so artifacts are reproducible per machine/build, not across PyTorch releases.
-6. **The hardware track has no silicon evidence yet.** Verilator 5.054 ran in the container image `verilator/verilator:latest`, and linted and simulated the design: the RTL elaborates clean under `-Wall`, runs latch free, and reproduces all 304 golden vector rows plus the core self test with 0 mismatches in two independent paths. That is simulation, nothing more. There is no Icarus, no Yosys, no OpenLane and no sky130A PDK here, and none of them ran anywhere, so no synthesis, no static timing, no power and no area number exists, and no second simulator has seen this RTL. The 4.0 ns period in `asic_chip/openlane/lingologos.sdc` is a declared budget, every electrical cell of the datasheet says NOT MEASURED, and the behavioral and structural claims of section 1.10 beyond simulation remain verified in Python only.
+6. **The hardware track has layout evidence and no silicon evidence.** Verilator 5.054 ran in the container image `verilator/verilator:latest`, and linted and simulated the design: the RTL elaborates clean under `-Wall`, runs latch free, and reproduces all 304 golden vector rows plus the core self test with 0 mismatches in two independent paths. OpenLane 2.3.10 with the sky130A PDK completed two place and routes on 2026-11-09, all 78 steps each, which is why this tree now quotes post-layout numbers: three GDSII files per run, DRC at zero violations in Magic and in KLayout, LVS circuits match uniquely, area and utilization measured, static IR drop measured, and static timing reported over nine corners. What is still missing is a run that closed: both of them exited non zero on deferred setup and hold violations, the first also failed its antenna check on 54 pins and 46 nets while the second reported `Antenna Passed`, and both were constrained to a bring-up period, not to the declared one. There is no Icarus here and no second simulator has seen this RTL, and there is no Calibre and no signoff of that kind. The 4.0 ns period in `asic_chip/openlane/lingologos.sdc` is a declared budget and has never been routed; the layout of the first run misses setup by 4.4409 ns in the worst typical corner and by 15.7205 ns in the worst slow corner at an 8.0 ns period, and the layout of the second is 0.4906 ns short of a 30.0 ns period in that same slow corner while losing hold by up to 0.1540 ns on input paths. Power is a tool estimate under a default activity model, not a rating, and the datasheet labels every one of those figures with what it is.
 7. **The hardware bracket tracker recognizes the commutative image of Dyck-2.** With one state byte, round and square brackets must share the same two multipliers, so the automaton accepts `(]` and `][`. This is the same over-generation the software soundness certificate was built to catch, and it is declared in `asic_chip/artifacts/gf_rules.json` and in the datasheet instead of being papered over.
 8. **The core implements a documented subset, not a profile.** Every 64 bit operation, every system and privileged instruction, `FENCE.I`, any register field of 16 or above and any unaligned access are reported as illegal rather than performed; the 97 word firmware is an instruction-set self test of that subset, not an application.
 9. **No electrical characterization.** Absolute maximum ratings, supply current ranges and junction temperature limits are not characterized, and the package entry in `asic_chip/config.json` is a declared body chosen to fit 146 signal bits plus the declared power pins, not a purchased part.
 
 ### 4.5 Coverage of the Test Suite
-`tests/` (181 tests collected, 158 of them outside the two ASIC files of section 1.10) locks,
+`tests/` (184 tests collected, 158 of them outside the two ASIC files of section 1.10) locks,
 in particular: the distribution invariant for the parser and for the
 extracted grammar; inside vs Viterbi agreement; post-pruning renormalization against
 `probability_pre_pruning`; disjoint train/test split; the corrected semantics of

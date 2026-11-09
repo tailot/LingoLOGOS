@@ -11,7 +11,9 @@
 #   make -f asic_chip/Makefile sim-iverilog    same checks in Icarus Verilog
 #   make -f asic_chip/Makefile lint            Verilator lint, no simulation
 #   make -f asic_chip/Makefile pytest          the Python gate suite
-#   make -f asic_chip/Makefile openlane        declared place and route run
+#   make -f asic_chip/Makefile openlane        place and route at the 32.0 ns bring-up gate
+#   make -f asic_chip/Makefile openlane-spec   the same flow at the declared 4.0 ns budget
+#   make -f asic_chip/Makefile setup-openlane  one command: OpenLane plus sky130A setup, then the flow
 #   make -f asic_chip/Makefile clean
 #
 # Every target that needs a tool reports it plainly if the tool is missing. On
@@ -42,10 +44,10 @@ VOPT := -O2 --timescale 1ns/1ps -Wall -Wno-UNSIGNED -Wno-UNUSED -Wno-WIDTHTRUNC
 
 .DEFAULT_GOAL := help
 
-.PHONY: help gen check sim-verilator sim-tb sim-iverilog lint pytest openlane clean
+.PHONY: help gen check sim-verilator sim-tb sim-iverilog lint pytest openlane openlane-spec setup-openlane clean
 
 help:
-	@echo "LingoLOGOS ASIC targets: gen check sim-verilator sim-tb sim-iverilog lint pytest openlane clean"
+	@echo "LingoLOGOS ASIC targets: gen check sim-verilator sim-tb sim-iverilog lint pytest openlane openlane-spec setup-openlane clean"
 
 # The generator is the only place the datapath is described. It rebuilds the three
 # generated modules, the golden vector table and the core self-test table from the
@@ -90,10 +92,31 @@ lint:
 pytest:
 	$(PYTHON) -m pytest -v tests/
 
-# Declared, not executed in this checkout. build_gds.sh detects OpenLane 1 or 2,
-# reports which one it found, and stops if neither is installed.
+# The script behind this target has run in this checkout, on 2026-11-09, in WSL Ubuntu with
+# openlane 2.3.10 and the sky130A PDK, though not through this target: three times, the last
+# as RUN_2026-11-09_21-14-43, which went through all 78 steps of the Classic flow in 12 min
+# 12 s and exited non zero on deferred setup and hold violations after reporting Antenna
+# Passed, LVS Passed and DRC Passed. build_gds.sh detects OpenLane 1 or 2, reports which one
+# it found, and stops if neither is reachable. It runs the 32.0 ns bring-up constraint set by
+# default, a period taken from the slack those runs measured, because the declared 4.0 ns
+# budget has never been routed.
 openlane: gen
 	sh $(ASIC)/scripts/build_gds.sh
+
+# The same flow at the declared 250 MHz budget, 4.0 ns. Never run: at the 8.0 ns gate of the
+# run of 2026-11-09 the same layout missed setup by 4.4409 ns in the worst typical corner and
+# by 15.7205 ns in the worst slow one, so expect this to stop at the timing gate until the
+# critical path has been reworked, not rerouted.
+openlane-spec: gen
+	LL_OPENLANE_CONFIG=config.json sh $(ASIC)/scripts/build_gds.sh
+
+# One command that installs what the flow needs and then runs it. This is the POSIX
+# route, valid on Linux and inside WSL: the distribution itself, Docker Desktop and
+# its WSL integration cannot be installed or started from inside the distribution,
+# so from Windows drive the same sequence with the PowerShell twin,
+# asic_chip/scripts/setup_openlane_flow.ps1, run from the Windows shell.
+setup-openlane:
+	sh $(ASIC)/scripts/setup_openlane_flow.sh
 
 clean:
 	rm -rf $(OBJDIR) $(OBJDIR)_tb $(OBJDIR)_vvp

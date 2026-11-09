@@ -43,14 +43,13 @@ Gates in this file
 
 from __future__ import annotations
 
-import fnmatch
 import hashlib
 import json
 import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ASIC_DIR = REPO_ROOT / "asic_chip"
@@ -990,7 +989,13 @@ PIN_ROW = re.compile(
     r"\s*(?P<direction>input|output|power)\s*\|",
     re.M,
 )
-PIN_PLAN_LINE = re.compile(r"^(?P<side>left|top|right|bottom)\s+(?P<glob>[A-Za-z0-9_*?\[\]]+)\s*$", re.M)
+PIN_PLAN_SIDES = {"N": "top", "E": "right", "W": "left", "S": "bottom"}
+# The pin plan is read by the pin constraint grammar of OpenLane 2, not by the line
+# oriented format of OpenLane 1. That grammar has no comment token, and the only
+# characters it will lex inside a pattern, besides letters, digits and underscores, are
+# these. A dash inside brackets, which reads as a character range to a human, is a
+# token recognition error there.
+PIN_PLAN_PATTERN_CHARS = set("\\.*+?()[]|")
 
 
 def test_pinout_agrees_in_rtl_config_datasheet_and_pin_plan() -> None:
@@ -1034,19 +1039,52 @@ def test_pinout_agrees_in_rtl_config_datasheet_and_pin_plan() -> None:
     assert sum(power_rows.values()) == int(config["package"]["power_pins"])
     assert all(count == 7 for count in power_rows.values())
 
-    plan = [(m.group("side"), m.group("glob")) for m in PIN_PLAN_LINE.finditer(read_text(PIN_ORDER))]
-    assert plan, "the pin order plan has no directives"
+    # The tool matches its own bit level pin names against these patterns anchored at
+    # both ends, so the gate builds the same names from the RTL and applies the same
+    # anchoring. A pattern that matches nothing, or that leaves a pin unplaced, is what
+    # stopped the first run at the custom I/O placement step.
+    bit_names: Dict[str, str] = {}
+    for name, width in rtl_width.items():
+        if width == 1:
+            bit_names[name] = name
+        else:
+            for index in range(width):
+                bit_names[f"{name}[{index}]"] = name
+
+    plan = []
+    side: Optional[str] = None
+    for raw in read_text(PIN_ORDER).splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            side = PIN_PLAN_SIDES.get(line[1:].strip())
+            assert side, f"the pin plan has a directive the pin grammar does not know: {line}"
+            continue
+        stray = sorted({c for c in line if not (c.isalnum() or c == "_" or c in PIN_PLAN_PATTERN_CHARS)})
+        assert not stray, f"the pin plan pattern {line} uses {stray}, which the pin grammar cannot lex"
+        assert side is not None, f"the pin plan pattern {line} appears before any side directive"
+        plan.append((side, line))
+    assert plan, "the pin order plan has no patterns"
+
     hits: Dict[str, List[str]] = {name: [] for name in rtl_width}
-    for side, glob in plan:
-        matched = [name for name in rtl_width if fnmatch.fnmatch(name, glob)]
-        assert matched, f"the pin order pattern {glob} matches no port"
-        for name in matched:
-            hits[name].append(side)
+    bit_side: Dict[str, str] = {}
+    for side, pattern in plan:
+        matcher = re.compile(pattern)
+        found = [bit for bit in bit_names if matcher.fullmatch(bit)]
+        assert found, f"the pin order pattern {pattern} matches no pin of the netlist"
+        for bit in found:
+            assert bit not in bit_side, f"{bit} is matched twice in the pin order plan"
+            bit_side[bit] = side
+            hits[bit_names[bit]].append(side)
+    unplaced = sorted(set(bit_names) - set(bit_side))
+    assert not unplaced, f"{len(unplaced)} pins of the netlist are in no pin order pattern, for example {unplaced[:5]}"
     for name, sides in hits.items():
-        assert len(sides) == 1, f"{name} is matched by {len(sides)} pin order patterns"
+        assert sides, f"{name} is matched by no pin order pattern"
+        assert len(set(sides)) == 1, f"{name} is placed on more than one side in the pin order plan"
         assert sides[0] == datasheet_side[name], f"{name} is placed on {sides[0]} in the plan and {datasheet_side[name]} in the datasheet"
     for side in ("left", "top", "right", "bottom"):
-        bits = sum(rtl_width[name] for name, sides in hits.items() if sides[0] == side)
+        bits = sum(1 for placed_on in bit_side.values() if placed_on == side)
         declared = sum(
             int(match.group("width"))
             for match in rows
@@ -1063,6 +1101,256 @@ def test_pinout_agrees_in_rtl_config_datasheet_and_pin_plan() -> None:
 # gate 12
 # -----------------------------------------------------------------------------
 
+def test_bringup_constraint_set_differs_from_the_spec_only_in_the_period() -> None:
+    """The bring-up set exists to reach a routed layout, not to move the goalposts."""
+    config = chip_config()
+    spec = read_json(OPENLANE_CONFIG)
+    bringup_path = OPENLANE_CONFIG.parent / "config.bringup.json"
+    assert bringup_path.is_file(), "no bring-up configuration next to config.json"
+    bringup = read_json(bringup_path)
+
+    assert float(bringup["CLOCK_PERIOD"]) == float(config["bringup_clock_period_ns"])
+    assert float(bringup["CLOCK_PERIOD"]) > float(spec["CLOCK_PERIOD"])
+    assert bringup["SDC"] == ["dir::lingologos.bringup.sdc"]
+    differing = {
+        key
+        for key in set(spec) | set(bringup)
+        if not key.startswith("NOTE_") and spec.get(key) != bringup.get(key)
+    }
+    assert differing == {"CLOCK_PERIOD", "SDC", "PNR_SDC_FILE", "SIGNOFF_SDC_FILE"}, (
+        "the bring-up set changed more than the period and the three keys that name the "
+        f"constraint file holding it: {sorted(differing)}"
+    )
+    for one in (spec, bringup):
+        assert one["PNR_SDC_FILE"] == one["SIGNOFF_SDC_FILE"] == one["SDC"][0], (
+            "a set whose place and route and signoff constraint files are unnamed times the "
+            "design against the generic file openlane falls back to"
+        )
+    for one in (spec, bringup):
+        assert one["SETUP_VIOLATION_CORNERS"] == ["*"], (
+            "a setup violation in a corner outside this list is a warning and nothing more, and "
+            "what OpenLane installs for a sky130 PDK by default is the typical corner only"
+        )
+        assert one["HOLD_VIOLATION_CORNERS"] == ["*"], (
+            "the hold violations of the complete run were all in the corners it was measured at"
+        )
+        for absent in ("QUIT_ON_TIMING_VIOLATIONS", "RUN_CVC", "QUIT_ON_LINTER_ERRORS",
+                       "DIODE_INSERTION_STRATEGY"):
+            assert absent not in one, (
+                f"{absent} is a key this OpenLane does not read, or one it rewrites other keys "
+                "from: it stays in a configuration only as a warning in the log and a control "
+                "nobody has"
+            )
+        assert one["RUN_HEURISTIC_DIODE_INSERTION"] is True, (
+            "the antenna check of the complete run failed on 54 pins and 46 nets, and the "
+            "heuristic diode insertion step is the one the legacy strategy key switched off"
+        )
+        assert one["DIODE_ON_PORTS"] == "in"
+        assert int(one["HEURISTIC_ANTENNA_THRESHOLD"]) < 90
+        assert int(one["GRT_ANTENNA_ITERS"]) > 3 and int(one["GRT_ANTENNA_MARGIN"]) > 10
+        assert one["RUN_POST_GRT_DESIGN_REPAIR"] is True
+        assert one["RUN_POST_GRT_RESIZER_TIMING"] is True
+        # The run at the 30.0 ns gate measured the gap these two margins have to cover: the
+        # resizer closed hold at +0.100201 ns in nom_tt_025C_1v80 and the same corner read
+        # -0.058548 ns at signoff on the extracted parasitics of the routed layout.
+        assert float(one["PL_RESIZER_HOLD_SLACK_MARGIN"]) >= 0.30, (
+            "the installed default placement resizer margin stops a hair past zero, and the loss "
+            "between the last hold repair and signoff measured 0.16 ns on this design"
+        )
+        assert float(one["GRT_RESIZER_HOLD_SLACK_MARGIN"]) >= 0.30, (
+            "the resizer after the global routing is the last one the Classic flow runs, so its "
+            "installed default margin of 0.05 ns decides how much hold the routed layout keeps"
+        )
+        for trades_setup in ("PL_RESIZER_ALLOW_SETUP_VIOS", "GRT_RESIZER_ALLOW_SETUP_VIOS"):
+            assert trades_setup not in one, (
+                "a resizer told to allow setup violations buys the hold side with the setup side, "
+                "and setup is what the signoff of the complete runs failed on"
+            )
+
+    sdc = read_text(OPENLANE_CONFIG.parent / "lingologos.bringup.sdc")
+    clock = re.search(r"create_clock\s+-name\s+(\w+)\s+-period\s+([\d.]+)", sdc)
+    assert clock, "the bring-up constraint file does not declare a clock"
+    assert clock.group(1) == config["clock_port"]
+    assert float(clock.group(2)) == float(config["bringup_clock_period_ns"])
+
+    script = read_text(ASIC_DIR / "scripts" / "build_gds.sh")
+    assert "config.bringup.json" in script, "the flow entry point cannot select the bring-up set"
+    assert "LL_OPENLANE_CONFIG" in script, "the choice is not overridable from the environment"
+    assert 'FLOW_STATUS=$?' in script, (
+        "a flow that ends in deferred signoff errors still wrote a GDSII and the reports that say "
+        "what failed, and an entry point that dies at that moment never prints them"
+    )
+    assert 'exit "$FLOW_STATUS"' in script, "the status of the flow must reach the caller"
+
+
+def test_setup_installs_openlane_only_on_an_interpreter_with_prebuilt_wheels() -> None:
+    """A newer interpreter has no wheel for libparse, and its source build failed here."""
+    setup = read_text(ASIC_DIR / "scripts" / "setup_openlane_flow.sh")
+
+    candidates = re.search(r"for candidate in ([^\n]+?)\s+do", setup)
+    assert candidates, "the setup script does not name the interpreters it will accept"
+    offered = candidates.group(1).split()
+    assert offered[0] == '"${LL_PYTHON:-}"', "an explicit interpreter must win over the search"
+    assert "python3.12" in offered, "the newest interpreter with a libparse wheel must be offered"
+    for too_new_name in ("python3.13", "python3.14"):
+        assert too_new_name not in offered, f"{too_new_name} has no prebuilt libparse wheel"
+    assert "python3" in offered[-1], "the distribution default stays last"
+
+    assert "(3, 13)" in setup, (
+        "the ceiling that rejects an interpreter without wheels has moved"
+    )
+    assert 'rm -rf "$VENV"' in setup, (
+        "a virtual environment left on an interpreter pip cannot install into is reused"
+    )
+    assert "--no-ppa" in setup and "deadsnakes" in setup, (
+        "Ubuntu 26.04 carries no older interpreter, so the route to python3.12 is documented in the script"
+    )
+    assert "python-build-standalone" in setup and "cpython-3.12." in setup, (
+        "the script gives up instead of obtaining an interpreter with wheels itself"
+    )
+    assert "LL_PYTHON_URL" in setup, "the interpreter the script downloads cannot be replaced"
+    assert "python3.12-tk" in setup and "import tkinter" in setup, (
+        "openlane imports tkinter before it reads a design, and an interpreter can be the "
+        "right version and still not carry that module"
+    )
+
+    instructions = read_text(ASIC_DIR / "doc" / "build_instructions.md")
+    assert "ppa:deadsnakes/ppa" in instructions
+    assert "python-build-standalone" in instructions, (
+        "the interpreter the script fetches when apt fails is not in the instructions"
+    )
+    assert "cp312" in instructions, "the wheel ceiling is not recorded in the instructions"
+    report = read_text(ASIC_DIR / "doc" / "verification_report.md")
+    assert "No rule to make target" in report, (
+        "the source build that failed on this machine is not recorded as a result"
+    )
+    assert "CPython 3.12.16" in report, (
+        "the install that proves the interpreter ceiling was not recorded as executed"
+    )
+
+
+def test_setup_and_flow_drive_the_volare_and_openlane_that_are_actually_installed() -> None:
+    """The volare installed here has no --global option, and its openlane is not on PATH."""
+    setup = read_text(ASIC_DIR / "scripts" / "setup_openlane_flow.sh")
+    entry = read_text(ASIC_DIR / "scripts" / "build_gds.sh")
+
+    assert 'volare" --global' not in setup, (
+        "volare 0.20 answers --global with an error of its own, which the discarded stderr "
+        "of this script used to turn into a complaint about the network"
+    )
+    assert '"$VENV/bin/volare" ls-remote --pdk sky130' in setup, (
+        "the version listing must be the subcommand of the volare this flow installs"
+    )
+    assert 'volare" fetch --pdk-root "$PDK_ROOT" --pdk sky130 $PDK_FETCH_ARGS' in setup, (
+        "the PDK root and the family are options of the subcommand there, not of the command"
+    )
+    assert "LL_PDK_LIBRARIES" in setup, (
+        "one PDK version with every library measured 16 GiB on this machine against 2.1 GiB for "
+        "the set this flow reads, so the large set has to be a choice and never the default"
+    )
+    assert 'volare" enable --pdk-root' in setup, (
+        "enabling is what leaves a sky130A under the PDK root for the flow to find"
+    )
+
+    assert "export LL_OPENLANE_BIN" in setup, (
+        "the setup installs openlane somewhere PATH does not reach and does not say where"
+    )
+    assert "find_openlane2" in entry and "LL_OPENLANE_BIN" in entry, (
+        "the flow entry point cannot reach a tool installed in a virtual environment"
+    )
+    assert '"$HOME/openlane-venv/bin/openlane"' in entry, (
+        "the environment the one command setup creates is not among the places searched"
+    )
+    assert '--dockerized "$DESIGN_DIR/$FLOW_CONFIG"' in entry, (
+        "a pip install of openlane carries no tools, so the container image has to be asked for"
+    )
+    assert "${PDK_ROOT:-}" in entry, (
+        "PDK_ROOT has a default in the setup and none in the entry point run on its own"
+    )
+
+    # The flow has run, so the tree has to talk about the run it has, not only about the
+    # one it hopes for. These assertions hold the documentation to what the tools printed.
+    run_dir = "asic_chip/openlane/runs/RUN_2026-11-09_16-15-02"
+    report = read_text(ASIC_DIR / "doc" / "verification_report.md")
+    instructions = read_text(ASIC_DIR / "doc" / "build_instructions.md")
+    datasheet = read_text(DATASHEET)
+    assert run_dir in entry, (
+        "the entry point still looks for a run directory only where the tool has never written one"
+    )
+    assert run_dir in instructions and "01-verilator-lint" in instructions, (
+        "the instructions do not say which steps of the first real run left logs, and where"
+    )
+    assert "25-odb-customioplacement" in report and "token recognition error at: '-'" in report, (
+        "the step that stopped the first run, and the error it printed, are not in the report"
+    )
+    second_run = "asic_chip/openlane/runs/RUN_2026-11-09_18-43-18"
+    assert second_run in report and second_run in instructions and second_run in entry, (
+        "the run that went through all 78 steps of the Classic flow is not named where a reader "
+        "would look for it"
+    )
+    third_run = "asic_chip/openlane/runs/RUN_2026-11-09_21-14-43"
+    assert third_run in report and third_run in instructions and third_run in entry, (
+        "the run whose manufacturability report says Antenna Passed, LVS Passed and DRC Passed is "
+        "not named where a reader would look for it"
+    )
+    assert "Antenna Passed" in report and "Antenna Passed" in instructions, (
+        "a reader of these documents still finds only the failed antenna check of the first "
+        "complete run and never the one that passed"
+    )
+    assert "PL_RESIZER_HOLD_SLACK_MARGIN" in entry and "0.40" in entry, (
+        "the entry point does not say which hold margin the constraint sets ask the two resizers "
+        "for, which is the knob the second complete run measured the need for"
+    )
+    assert "-0.4906" in datasheet and "32.0 ns" in datasheet, (
+        "the slack by which the second layout missed the slow corner, and the period the next run "
+        "is held to, are not in the datasheet"
+    )
+    assert "Final result: Circuits match uniquely." in report, (
+        "the line netgen printed when the extracted layout was compared against the synthesized "
+        "netlist is not quoted where the outcome of that check is recorded"
+    )
+    assert "circuits match uniquely" in instructions, (
+        "the instructions do not say what the layout versus schematic check concluded"
+    )
+    for fact in ("Antenna Failed", "SETUP_VIOLATION_CORNERS", "HOLD_VIOLATION_CORNERS"):
+        assert fact in report, f"the signoff outcome {fact!r} of that run is missing from the report"
+        assert fact in instructions, f"the signoff outcome {fact!r} of that run is missing from the instructions"
+    assert "169,306" in datasheet and "17,552" in datasheet, (
+        "the area and instance count a real place and route measured for this design are not in "
+        "the datasheet, only the pre-layout synthesis figures"
+    )
+    assert "149097.996800" in report, (
+        "the only area figure a real tool produced for this design is not recorded as measured"
+    )
+    assert "149,098 square micrometers" in datasheet and "11,015" in datasheet, (
+        "the pre-layout cell count and cell area of that synthesis are not in the datasheet"
+    )
+    assert "#W" in instructions and "@min_distance" in instructions, (
+        "the grammar the pin plan file has to be written in is documented nowhere a reader looks"
+    )
+    for name in ("config.json", "config.bringup.json"):
+        openlane_config = read_json(ASIC_DIR / "openlane" / name)
+        assert (
+            openlane_config["PNR_SDC_FILE"]
+            == openlane_config["SIGNOFF_SDC_FILE"]
+            == openlane_config["SDC"][0]
+        ), (
+            "openlane warns that the place and route and the signoff constraint files are "
+            "undefined and then times the design against a generic file instead of this one"
+        )
+
+    instructions_text = instructions
+    assert "ls-remote --pdk sky130" in instructions_text, (
+        "the volare spelling the script now uses is not in the instructions"
+    )
+    assert "No such option '--global'" in instructions, (
+        "the spelling that fails, and the error it prints, are not recorded where a reader looks"
+    )
+    assert "No module named 'tkinter'" in instructions, (
+        "the interpreter that installs openlane correctly and still cannot start it is not documented"
+    )
+
+
 def test_openlane_setup_agrees_with_the_chip_configuration() -> None:
     config = chip_config()
     openlane = read_json(OPENLANE_CONFIG)
@@ -1075,7 +1363,16 @@ def test_openlane_setup_agrees_with_the_chip_configuration() -> None:
     assert openlane["CLOCK_PORT"] == config["clock_port"]
     assert openlane["CLOCK_PORT"] in inputs
     assert float(openlane["CLOCK_PERIOD"]) == float(config["clock_period_ns"])
-    assert openlane["QUIT_ON_TIMING_VIOLATIONS"] is True
+    assert openlane["SETUP_VIOLATION_CORNERS"] == ["*"], (
+        "a negative slack fails the flow only in a corner the configuration named, and what "
+        "OpenLane installs for a sky130 PDK by default is the typical corner alone"
+    )
+    assert openlane["HOLD_VIOLATION_CORNERS"] == ["*"]
+    assert openlane["ERROR_ON_LINTER_ERRORS"] is True, (
+        "the lint error check of the run that reached the end of the flow came back clear, so "
+        "there is no measured reason to relax it, and the 14 warnings it reported are gated "
+        "apart from this"
+    )
     assert openlane["MACROS"] == []
     assert "LL_DEBUG_PORTS" not in json.dumps(openlane["SYNTH_DEFINES"])
 
