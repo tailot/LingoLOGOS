@@ -13,6 +13,31 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 from .schema import Envelope, VolatileState, Payload, SMTConstraints
+from .topology_ctrl import TopologyCtrlRegister
+
+
+def discover_board_topology(
+    hardware_node_id: int,
+    discovered_peers_count: int,
+    dataset_id: int = 0,
+    routing_mask: int = 0,
+) -> TopologyCtrlRegister:
+    """Executes topology negotiation and returns programmed TOPOLOGY_CTRL register.
+
+    In standalone mode (probe timeout or 0 peers):
+      TOPOLOGY_CTRL.STANDALONE = 1
+      DATASET_ID = primary local dataset
+    In interconnected multi-chip mode (peers > 0):
+      TOPOLOGY_CTRL.STANDALONE = 0
+      TOTAL_NODES = 1 + discovered_peers_count
+      DATASET_ID = assigned shard index
+    """
+    return TopologyCtrlRegister.from_handshake(
+        hardware_node_id=hardware_node_id,
+        discovered_peers_count=discovered_peers_count,
+        dataset_id=dataset_id,
+        routing_mask=routing_mask,
+    )
 
 
 def load_seed_payload(node_dir: Path) -> Dict[str, Any]:
@@ -112,11 +137,28 @@ def main() -> int:
     parser.add_argument("--node-id", required=True, help="Arbitrary node identifier.")
     parser.add_argument("--role", default="node", help="Role of the node (e.g. proponent, opponent, validator).")
     parser.add_argument("--node-dir", required=True, help="Path to the node dataset directory.")
+    parser.add_argument("--hardware-node-id", type=int, default=0, help="Physical node ID from strapping pins (0..15).")
+    parser.add_argument("--probe-peers", type=int, default=0, help="Number of external peers discovered on board.")
+    parser.add_argument("--dataset-id", type=int, default=0, help="Logical dataset ID assigned to this node.")
+    parser.add_argument("--topology-ctrl-reg", type=str, default=None, help="Optional raw hex or JSON for TOPOLOGY_CTRL register.")
     args = parser.parse_args()
 
     node_id = args.node_id
     role = args.role
     node_dir = Path(args.node_dir).resolve()
+
+    # Determine TOPOLOGY_CTRL configuration
+    if args.topology_ctrl_reg:
+        if args.topology_ctrl_reg.startswith("0x") or args.topology_ctrl_reg.isdigit():
+            topology_ctrl = TopologyCtrlRegister.unpack(int(args.topology_ctrl_reg, 0))
+        else:
+            topology_ctrl = TopologyCtrlRegister.from_dict(json.loads(args.topology_ctrl_reg))
+    else:
+        topology_ctrl = discover_board_topology(
+            hardware_node_id=args.hardware_node_id,
+            discovered_peers_count=args.probe_peers,
+            dataset_id=args.dataset_id,
+        )
 
     # Read incoming envelope from stdin
     stdin_content = sys.stdin.read().strip()
@@ -126,6 +168,8 @@ def main() -> int:
         seed_data = load_seed_payload(node_dir)
         # Ensure sender matches node_id
         seed_data["sender"] = node_id
+        seed_data["topologyCtrl"] = topology_ctrl.to_dict()
+        seed_data["datasetId"] = topology_ctrl.dataset_id
         envelope = Envelope.from_dict(seed_data)
     else:
         incoming_data = json.loads(stdin_content)
@@ -135,6 +179,8 @@ def main() -> int:
             # Emit seed payload
             seed_data = load_seed_payload(node_dir)
             seed_data["sender"] = node_id
+            seed_data["topologyCtrl"] = topology_ctrl.to_dict()
+            seed_data["datasetId"] = topology_ctrl.dataset_id
             envelope = Envelope.from_dict(seed_data)
         else:
             envelope = generate_node_response(
@@ -143,6 +189,9 @@ def main() -> int:
                 node_dir=node_dir,
                 incoming=incoming_envelope,
             )
+            # Propagate or preserve topologyCtrl and datasetId
+            envelope.topologyCtrl = topology_ctrl.to_dict()
+            envelope.datasetId = topology_ctrl.dataset_id
 
     # Print output envelope JSON to stdout
     print(json.dumps(envelope.to_dict(), indent=2))

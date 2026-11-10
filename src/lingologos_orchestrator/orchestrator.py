@@ -27,6 +27,7 @@ from .schema import (
 )
 from .verifier import Z3Verifier, SMTVerificationResult
 from .node_runner import NodeProcessRunner
+from .topology_ctrl import TopologyCtrlRegister
 
 
 @dataclass
@@ -96,6 +97,7 @@ class MultiInstanceOrchestrator:
         self.ontologies: Dict[str, str] = {}
         self.grammars: Dict[str, str] = {}
         self.initial_envelopes: Dict[str, Envelope] = {}
+        self.topology_ctrl_by_node: Dict[str, TopologyCtrlRegister] = {}
 
     @classmethod
     def from_config_file(
@@ -196,11 +198,53 @@ class MultiInstanceOrchestrator:
         return True
 
     # -------------------------------------------------------------------------
-    # Phase 02: Process Initialization
+    # Phase 02: Process Initialization & Topology Negotiation
     # -------------------------------------------------------------------------
+    def negotiate_topology(self) -> Dict[str, TopologyCtrlRegister]:
+        """Negotiates dynamic board topology for all instances.
+
+        Single-Chip / Standalone Mode (1 instance):
+          TOPOLOGY_CTRL.STANDALONE = 1
+          DATASET_ID = 0 (primary local dataset)
+
+        Multi-Chip / Distributed Mode (N > 1 instances):
+          TOPOLOGY_CTRL.STANDALONE = 0
+          TOTAL_NODES = N
+          DATASET_ID = assigned shard index (0..N-1)
+          ROUTING_MASK = computed bitmask of reachable neighbors
+        """
+        total = len(self.config.instances)
+        id_to_hw: Dict[str, int] = {
+            inst.id: idx for idx, inst in enumerate(self.config.instances)
+        }
+
+        for idx, instance in enumerate(self.config.instances):
+            hw_id = id_to_hw[instance.id]
+            peers = total - 1
+
+            # Compute routing mask
+            routing_mask = 0
+            for rule in self.config.routingMatrix:
+                if rule.from_node == instance.id:
+                    for target in rule.to_nodes:
+                        if target in id_to_hw:
+                            target_hw = id_to_hw[target]
+                            routing_mask |= (1 << target_hw)
+
+            reg = TopologyCtrlRegister.from_handshake(
+                hardware_node_id=hw_id,
+                discovered_peers_count=peers,
+                dataset_id=idx,
+                routing_mask=routing_mask,
+            )
+            self.topology_ctrl_by_node[instance.id] = reg
+
+        return self.topology_ctrl_by_node
+
     def initialize_processes(self) -> None:
         """Initializes runners for isolated node processes and sets up volatile runtime state."""
         self.runtime_state_dir.mkdir(parents=True, exist_ok=True)
+        self.negotiate_topology()
 
         for instance in self.config.instances:
             runner = NodeProcessRunner(
@@ -210,6 +254,12 @@ class MultiInstanceOrchestrator:
                 datasets_dir=self.datasets_dir,
                 workspace_dir=self.workspace_dir,
             )
+            reg = self.topology_ctrl_by_node.get(instance.id)
+            if reg:
+                runner.hardware_node_id = reg.node_id
+                runner.probe_peers = reg.total_nodes - 1 if reg.total_nodes > 1 else 0
+                runner.dataset_id = reg.dataset_id
+                runner.topology_ctrl_reg = f"0x{reg.pack():08X}"
             self.runners[instance.id] = runner
 
     # -------------------------------------------------------------------------

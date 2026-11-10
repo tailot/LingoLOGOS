@@ -130,6 +130,8 @@ class Envelope:
     volatileState: VolatileState
     payload: Payload
     recipient: Optional[str] = None
+    topologyCtrl: Optional[Dict[str, Any]] = None
+    datasetId: Optional[int] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Envelope":
@@ -140,6 +142,8 @@ class Envelope:
         turn = data.get("turn")
         vs_data = data.get("volatileState")
         payload_data = data.get("payload")
+        topology_ctrl = data.get("topologyCtrl")
+        dataset_id = data.get("datasetId")
 
         if not isinstance(sender, str) or not sender.strip():
             raise SchemaValidationError("sender must be a non-empty string.")
@@ -158,6 +162,8 @@ class Envelope:
             turn=turn,
             volatileState=VolatileState.from_dict(vs_data),
             payload=Payload.from_dict(payload_data),
+            topologyCtrl=topology_ctrl if isinstance(topology_ctrl, dict) else None,
+            datasetId=dataset_id if isinstance(dataset_id, int) else None,
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -169,6 +175,10 @@ class Envelope:
         }
         if self.recipient is not None:
             data["recipient"] = self.recipient
+        if self.topologyCtrl is not None:
+            data["topologyCtrl"] = self.topologyCtrl
+        if self.datasetId is not None:
+            data["datasetId"] = self.datasetId
         return data
 
 

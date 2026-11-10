@@ -47,6 +47,10 @@ class NodeProcessRunner:
         self.workspace_dir = Path(workspace_dir).resolve() if workspace_dir else Path.cwd()
         self.timeout_seconds = timeout_seconds
         self.command_path = self._resolve_executable(executable)
+        self.hardware_node_id: int = 0
+        self.probe_peers: int = 0
+        self.dataset_id: int = 0
+        self.topology_ctrl_reg: Optional[str] = None
 
     def _resolve_executable(self, executable: str) -> List[str]:
         """Resolves the executable path or command args."""
@@ -76,7 +80,12 @@ class NodeProcessRunner:
             "--node-id", self.node_id,
             "--role", self.role,
             "--node-dir", str(node_dataset_dir),
+            "--hardware-node-id", str(self.hardware_node_id),
+            "--probe-peers", str(self.probe_peers),
+            "--dataset-id", str(self.dataset_id),
         ])
+        if self.topology_ctrl_reg:
+            cmd.extend(["--topology-ctrl-reg", str(self.topology_ctrl_reg)])
 
         input_json_str = json.dumps(input_envelope.to_dict())
 
