@@ -21,6 +21,7 @@ venv/
 # asic_chip/rtl/generated is deliberately versioned, not ignored.
 asic_chip/sim/obj_dir/
 asic_chip/sim/obj_dir_tb/
+asic_chip/sim/obj_dir_topology/
 asic_chip/sim/obj_dir_vvp/
 asic_chip/sim/*.vcd
 asic_chip/sim/*.vvp

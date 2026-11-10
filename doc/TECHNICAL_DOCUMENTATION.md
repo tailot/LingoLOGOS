@@ -541,7 +541,7 @@ in `asic_chip/Makefile` and in `sim/sim_main.cpp` are relative to it.
 | --- | --- | --- | --- |
 | regenerate the generated RTL, both vector tables and the manifest | `python asic_chip/scripts/lingologos_compiler.py` | CPython, standard library only | EXECUTED, `FINAL VERDICT: PASS` |
 | prove the checked in files are the current ones | `python asic_chip/scripts/lingologos_compiler.py --check` | same | EXECUTED, adds the `RTL_matches_artifacts` gate |
-| run the gate suite required by `AGENTS.md` | `pytest -v tests/` | pytest | EXECUTED, 205 passed |
+| run the gate suite required by `AGENTS.md` | `pytest -v tests/` | pytest | EXECUTED, 208 passed |
 | lint and infer latches | `verilator --lint-only ... -DLL_DEBUG_PORTS --top-module lingologos_top` | Verilator 5.006 or later | EXECUTED in the image `verilator/verilator:latest`, Verilator 5.054, through `make -f asic_chip/Makefile lint`: exit 0, no warning left. NOT RUN on the host, where there is no Verilator and no `make` |
 | replay the 304 golden rows against Verilog | `verilator --cc --exe --build ... sim/sim_main.cpp` | Verilator and a C++ compiler | EXECUTED in that image, through `make -f asic_chip/Makefile sim-verilator`: 304 rows plus the core self test, 0 mismatches, `FINAL VERDICT: PASS`, 91 clock cycles for the self test, VCD written |
 | run the SystemVerilog testbench | `verilator --binary --timing ...` | Verilator | EXECUTED in that image, through `make -f asic_chip/Makefile sim-tb`: same checks, same verdict |
@@ -764,7 +764,7 @@ To maintain high engineering and academic standards:
 9. **No electrical characterization.** Absolute maximum ratings, supply current ranges and junction temperature limits are not characterized, and the package entry in `asic_chip/config.json` is a declared body chosen to fit 146 signal bits plus the declared power pins, not a purchased part.
 
 ### 4.5 Coverage of the Test Suite
-`tests/` (205 tests collected, 179 of them outside the two ASIC files of section 1.10) locks,
+`tests/` (208 tests collected, 182 of them outside the two ASIC files of section 1.10) locks,
 in particular: the distribution invariant for the parser and for the
 extracted grammar; inside vs Viterbi agreement; post-pruning renormalization against
 `probability_pre_pruning`; disjoint train/test split; the corrected semantics of
@@ -897,30 +897,82 @@ The hardware infrastructure and routing architecture configure the computation t
   - Compute roles are allocated dynamically (e.g., Agente Alfa proponent, Agente Beta opponent, Arbitro Logico validator).
 
 ### 14.2 Hardware Router Module: `lingologos_topology_router.sv`
-The switchable hardware router is implemented in `asic_chip/rtl/core/lingologos_topology_router.sv`:
+The switch of each die lives in `asic_chip/rtl/core/lingologos_topology_router.sv`: one
+instance per die, a registered single hop switch, configured by four of the five fields of
+`TOPOLOGY_CTRL` as those fields are decoded by the control and status layer.
+
 ```systemverilog
 module lingologos_topology_router #(
-    parameter int NODE_ID_WIDTH = 4,
-    parameter int DATA_WIDTH    = 64
+    parameter int unsigned NODE_ID_WIDTH = 4,
+    parameter int unsigned DATA_WIDTH    = 64,
+    parameter int unsigned MAX_NODES     = 1 << NODE_ID_WIDTH
 )(
-    input  logic                     clk,
-    input  logic                     rst_n,
-    input  logic                     standalone_mode,
-    input  logic [NODE_ID_WIDTH-1:0] current_node_id,
-    input  logic                     tx_valid_local,
-    input  logic [NODE_ID_WIDTH-1:0] tx_dest_node,
-    input  logic [DATA_WIDTH-1:0]    tx_data_local,
-    output logic                     tx_ready_local,
-    output logic                     rx_valid_local,
-    output logic [DATA_WIDTH-1:0]    rx_data_local,
-    input  logic                     rx_ready_local,
-    input  logic                     rx_valid_ext,
-    input  logic [DATA_WIDTH-1:0]    rx_data_ext,
-    output logic                     tx_valid_ext,
-    output logic [DATA_WIDTH-1:0]    tx_data_ext
+    input  logic                                   clk,
+    input  logic                                   rst_n,
+    // Fields of TOPOLOGY_CTRL.
+    input  logic                                   standalone,
+    input  logic [NODE_ID_WIDTH-1:0]               node_id,
+    input  logic [3:0]                             total_nodes,
+    input  logic [MAX_NODES-1:0]                   routing_mask,
+    // Injection and receive ports of the local core, valid and ready on both.
+    input  logic                                   tx_valid,
+    output logic                                   tx_ready,
+    input  logic [NODE_ID_WIDTH-1:0]               tx_dest,
+    input  logic [DATA_WIDTH-1:0]                  tx_data,
+    output logic                                   rx_valid,
+    output logic [DATA_WIDTH-1:0]                  rx_data,
+    input  logic                                   rx_ready,
+    // One channel per node id of the board, wired point to point by the board wrapper.
+    output logic [MAX_NODES-1:0]                   link_tx_valid,
+    input  logic [MAX_NODES-1:0]                   link_tx_ready,
+    output logic [MAX_NODES-1:0][NODE_ID_WIDTH-1:0] link_tx_dest,
+    output logic [MAX_NODES-1:0][DATA_WIDTH-1:0]    link_tx_data,
+    input  logic [MAX_NODES-1:0]                   link_rx_valid,
+    input  logic [MAX_NODES-1:0][NODE_ID_WIDTH-1:0] link_rx_dest,
+    input  logic [MAX_NODES-1:0][DATA_WIDTH-1:0]    link_rx_data,
+    output logic [MAX_NODES-1:0]                   link_rx_ready,
+    output logic                                   routing_error
 );
 ...
 ```
+
+Four decisions are worth stating, because they are what the module does not do:
+
+- **One hop, no relay.** `ROUTING_MASK` is a set of direct neighbours, not a path table, and
+  16 bits cannot carry one. A frame whose destination is not named by the mask is refused by
+  the injection port of the die that injected it, and the die reports it with one cycle pulse
+  on `routing_error`. This is only sound when every destination a die can be asked to reach
+  is wired to it directly, which is the case for the board `config/topology.json` declares;
+  `tests/test_topology_router.py::test_every_link_the_config_declares_is_a_direct_channel_of_the_switch`
+  reads the routing matrix and the negotiated masks and fails if a declared link ever stops
+  being a direct channel, so a board that would need a relay cannot be introduced without
+  turning that gate red.
+- **A mask bit and a channel index are the same thing.** Channel $i$ of a die is the wire to
+  node $i$, and the destination of a frame travels with the frame, so a link carries no
+  protocol state and a board wrapper is only a wire between identically configured dies.
+- **Loopback is a mode, not a mode of the mask.** With `STANDALONE` set, or with
+  `TOTAL_NODES` at one, an injected frame goes to the local receive register and no link
+  channel moves, whatever the destination field says.
+- **`DATASET_ID` is deliberately absent from this module.** It selects the corpus shard the
+  firmware of the die loads; it never reaches a datapath, and giving it a wire in the switch
+  would suggest the fabric can act on a shard number.
+
+The path from the injection port to `rx_valid` is two clock cycles when the way is free. The
+fabric buffers four frames in front of a stalled destination (the receive register of the
+destination die, the capture register of the channel, the send register of the source die,
+the injection stage of the source die) and only the fifth frame is refused by the injection
+port, which is back pressure rather than an imaginary always ready port.
+
+What has been done to this module and what has not: it lints clean under `-Wall` and it is
+simulated, in the container, through `make -f asic_chip/Makefile lint-topology` and
+`make -f asic_chip/Makefile sim-topology`, whose bench drives four dies over the six wires of
+the declared board and reports `FINAL VERDICT: PASS` over 42 assertions (section 2.4 of
+`asic_chip/doc/verification_report.md`). It is not instantiated in `lingologos_top.sv` and it
+appears in the `VERILOG_FILES` list of neither OpenLane config, so it has never been
+synthesized, placed or routed: no timing, no area and no power number in this tree describes
+it. `tests/test_topology_router.py::test_the_switch_is_linted_and_simulated_but_not_synthesized`
+locks that boundary in both directions.
+
 
 ### 14.3 CSR Control Register: `TOPOLOGY_CTRL`
 The 32-bit `TOPOLOGY_CTRL` register controls the router and dataset routing configuration:
@@ -932,6 +984,15 @@ The 32-bit `TOPOLOGY_CTRL` register controls the router and dataset routing conf
 | **8:5** | `TOTAL_NODES` | R/W | Total chips detected on board (1 for standalone, N for cluster). |
 | **15:9** | `DATASET_ID` | R/W | Logical dataset shard index assigned to this chip. |
 | **31:16** | `ROUTING_MASK` | R/W | Forwarding mask for adjacent nodes. |
+
+The register exists today as a definition and a packer in `src/lingologos_orchestrator/topology_ctrl.py`,
+which the orchestrator packs and hands to each `lllayer` process through
+`--topology-ctrl-reg`, and as four decoded inputs of the switch described above. There is no
+control and status block in `asic_chip/rtl/top/lingologos_top.sv` that holds these bits and no
+strapping pin that carries `NODE_ID`, so the field layout is a contract between the software
+and the switch, not a memory mapped register of the chip that was placed and routed.
+`tests/test_topology_router.py::test_switch_is_sized_by_the_register_it_is_wired_to` compares
+the widths of the two sides, which is where a silent disagreement would start.
 
 ### 14.4 Software Auto-Discovery and Handshake Flow (`lllayer`)
 When `lllayer` initialises on a node:

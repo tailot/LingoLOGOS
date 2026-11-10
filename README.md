@@ -332,7 +332,7 @@ $$A \to a:\ \delta = e(a),\ m = e(a) \qquad A \to B\,C:\ \delta = \delta_B + \de
 | **Selectivity (negative controls)** | `verify_negative_controls` | 100% rejection of 200 non-Dyck strings | **PASS (200/200)** |
 | **Rule induction quality** | `gold_rule_f1` | $F_1 \ge 0.90$ under NT alignment | **PASS (1.000)** |
 | **Language inclusion** | Z3 SMT Solver | **UNSAT** on certificate $+ \neg G$ | **PASS (UNSAT)** |
-| **Unit / integration tests** | pytest | All tests PASSED | **PASS (205 passed)** |
+| **Unit / integration tests** | pytest | All tests PASSED | **PASS (208 passed)** |
 
 ---
 
@@ -395,11 +395,13 @@ pytest -v tests/
 ```
 The suite also carries the gates of the ASIC track described in section 12: `tests/test_asic_compiler.py`
 recomputes every numeric claim in `asic_chip/` from the committed files and
-`tests/test_asic_core_firmware.py` emulates the core firmware, and `tests/test_grammar_artifacts.py` re-runs the synthesis and compares the committed formal outputs, so 205 tests pass in this
+`tests/test_asic_core_firmware.py` emulates the core firmware, and `tests/test_grammar_artifacts.py` re-runs the synthesis and compares the committed formal outputs, so 208 tests pass in this
 checkout with no HDL tool on the host. The ASIC steps that do need an external tool are
 documented in `asic_chip/doc/build_instructions.md`: Verilator 5.054 linted and simulated the
 design inside the image `verilator/verilator:latest`, OpenLane 2.3.10 with the sky130A PDK ran
-two complete place and routes in WSL Ubuntu, and Icarus Verilog has never run here.
+two complete place and routes in WSL Ubuntu, and Icarus Verilog has never run here. The
+topology switch of section 14 is covered by `make -f asic_chip/Makefile lint-topology` and
+`sim-topology`, in the same image; it is not part of either place and route.
 
 ### Continuous Integration (GitHub Actions)
 Tests and formal verification run automatically on push or pull requests via `.github/workflows/ci.yml` across Python **3.10**, **3.11**, and **3.12**.
@@ -692,7 +694,7 @@ refuses to start a place and route until `--check` passes, which is what keeps a
 
 ### 12.3 Verification status, executed against not run
 
-`python -m pytest -v tests/` in this checkout: **205 passed**, zero failures, zero errors; the synthesis that `tests/test_grammar_artifacts.py` performs once per session accounts for about 16 s of that wall time.
+`python -m pytest -v tests/` in this checkout: **208 passed**, zero failures, zero errors; the synthesis that `tests/test_grammar_artifacts.py` performs once per session accounts for about 16 s of that wall time.
 Twenty six of those tests target the ASIC tree: twenty in `tests/test_asic_compiler.py`
 and six in `tests/test_asic_core_firmware.py`, plus the helper model in
 `tests/asic_reference_model.py` that recomputes the dot product, the GF field, the clause
@@ -703,6 +705,7 @@ masks and the RV32E semantics without importing the generator.
 | L0 to L3 | artifact validity, generator gates H1 to H5, agreement of two independent models on every vector row and every input byte, byte level reproducibility and digests | EXECUTED by CPython 3.14.5 and pytest 9.1.1 |
 | Core behavior | the 97 word firmware emulated by the reference model: 89 cycles, 4 coprocessor accesses, one illegal `x16` probe at ROM slot 79, final registers `x8=0x00000009`, `x10=0x00000002`, `x11=0x0000104A`, `x13=0x00000013` | CROSS-CHECKED by emulation, and confirmed by simulation: both paths below assert the same readback, and the harness measures 91 cycles for the same run |
 | L4 | Verilator lint, the C++ harness over the 304 golden rows, the SystemVerilog testbench, Icarus | EXECUTED in the container image `verilator/verilator:latest` with Verilator 5.054: lint clean under `-Wall`, and both the harness and the testbench reporting `checked 304 vector rows plus the core self-test, 0 mismatches` and `FINAL VERDICT: PASS`, through the make targets of `asic_chip/Makefile`. NOT RUN on the host, NOT RUN with Icarus |
+| Topology fabric | the switch of section 14, four dies wired as `config/topology.json` declares: loopback, one hop delivery, refusal of a destination the mask does not name, back pressure through four buffer stages, a wire that disagrees with the mask | EXECUTED in the same container image, on 2026-11-10, through `lint-topology` and `sim-topology`: lint clean under `-Wall`, the bench reporting `checked 42 topology assertions on four dies, 0 mismatches` and `FINAL VERDICT: PASS`. NOT SYNTHESIZED: the module is in no top level and in no place and route |
 | L5 | synthesis, floorplan, placement, route, DRC, LVS, static timing, power, area, GDSII | Partly EXECUTED on 2026-11-09, in WSL Ubuntu with openlane 2.3.10 and the sky130A PDK: two runs went through all 78 steps of the Classic flow, in 16 min 59 s and in 12 min 12 s, each wrote three GDSII files, and both passed DRC with zero violations in Magic and in KLayout and LVS with `Circuits match uniquely`, each with area, utilization, IR drop and static timing over nine corners. The second reported `Antenna Passed`, which the first failed on 54 pins and 46 nets. Both exited non zero on deferred setup and hold violations at the bring-up period each was constrained to, 8.0 ns and 30.0 ns. Static timing at the declared 4.0 ns budget has never been run, and no frequency is claimed |
 
 The verification layer found real things, and the report names all twenty three of them. The
@@ -829,6 +832,21 @@ LingoLOGOS supports dynamic hardware topology switching on board via the `TOPOLO
   `TOPOLOGY_CTRL.STANDALONE = 1`. High-speed SerDes links are clock-gated for low power, and local transmission is routed directly to local reception via internal loopback. Local Z3 SMT and GF validation operate autonomously on the primary dataset.
 - **Multi-Chip Mode (Distributed Mesh)**:
   `TOPOLOGY_CTRL.STANDALONE = 0`. Discovers $N-1$ neighboring nodes, reads physical node strapping (`NODE_ID`), and routes traffic across board traces or locally based on destination node ID matching. Each chip processes assigned dataset shards (`DATASET_ID`).
+
+### The Switch That Implements It
+
+`asic_chip/rtl/core/lingologos_topology_router.sv` is one registered single hop switch per die. `ROUTING_MASK` names direct neighbours and nothing else: a frame whose destination is not one of them is refused by the die that injected it, and that die reports it with a one cycle pulse on `routing_error`. There is no relay and no queue, because 16 mask bits cannot hold a path. In front of a destination that will not take a frame the fabric buffers four frames and refuses the fifth, so the core of the injecting die sees back pressure instead of an always ready port. `TOPOLOGY_CTRL.DATASET_ID` is deliberately not wired to the switch: it selects the corpus shard the firmware of the die loads, and the fabric cannot act on a shard number.
+
+Two make targets cover it, and both ran in the container image `verilator/verilator:latest`:
+
+```sh
+make -f asic_chip/Makefile lint-topology
+make -f asic_chip/Makefile sim-topology
+```
+
+The lint of the switch and of its bench ends with `topology switch lint clean` at exit 0. The bench instantiates four dies, wires the six links that `config/topology.json` declares, and ends with `checked 42 topology assertions on four dies, 0 mismatches` and `FINAL VERDICT: PASS`; section 2.4.1 of `asic_chip/doc/verification_report.md` holds the commands and the quoted output.
+
+What has not been done to that module: it is not instantiated in `lingologos_top.sv` and it is in the `VERILOG_FILES` list of neither OpenLane config, so it has never been synthesized, placed or routed, and no timing, area or power figure in this repository describes it. `tests/test_topology_router.py` locks that boundary in both directions, and section 14.2 of `doc/TECHNICAL_DOCUMENTATION.md` states the design decisions and why the mask is a neighbour set rather than a route.
 
 ### Windows PowerShell & WSL Bridge
 For cross-platform development on Windows host with isolated Linux execution, `.venv-train/Scripts/Activate.ps1` (and `scripts/Activate.ps1`) provides idempotent WSL environment bootstrap and auto-sync for dependencies and CLI tools.

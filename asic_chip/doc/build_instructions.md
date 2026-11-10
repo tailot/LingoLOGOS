@@ -178,7 +178,7 @@ That is the shortest route, and it is the one used for the recorded results:
 
 ```sh
 docker run --rm -v "$PWD:/work" -w /work --entrypoint sh verilator/verilator:latest \
-  -c 'make -f asic_chip/Makefile lint && make -f asic_chip/Makefile sim-tb && make -f asic_chip/Makefile sim-verilator'
+  -c 'make -f asic_chip/Makefile lint && make -f asic_chip/Makefile sim-tb && make -f asic_chip/Makefile sim-verilator && make -f asic_chip/Makefile sim-topology'
 ```
 
 To start the built model instead of the tool, replace the entrypoint:
@@ -539,8 +539,10 @@ make -f asic_chip/Makefile help
 | `check` | Python | runs the same with `--check` |
 | `sim-verilator` | Verilator, a C++ compiler | builds and runs the C++ harness, dumps `asic_chip/sim/lingologos.vcd` |
 | `sim-tb` | Verilator | builds and runs `sim/testbench.sv` |
+| `sim-topology` | Verilator | builds and runs `sim/topology_testbench.sv`: four dies of the topology switch, wired as `config/topology.json` declares |
 | `sim-iverilog` | Icarus Verilog | compiles and runs the same testbench with `vvp` |
-| `lint` | Verilator | lint only, no simulation |
+| `lint` | Verilator | lint only, no simulation. It runs `lint-topology` as well, so the topology switch is covered by this target |
+| `lint-topology` | Verilator | lints the topology switch alone, and then with its bench on top |
 | `pytest` | Python, pytest | `python -m pytest -v tests/` |
 | `openlane` | Python, OpenLane, PDK | `sh asic_chip/scripts/build_gds.sh`, at the 32.0 ns bring-up gate |
 | `openlane-spec` | Python, OpenLane, PDK | the same script with `LL_OPENLANE_CONFIG=config.json`, at the declared 4.0 ns budget |
@@ -550,8 +552,10 @@ make -f asic_chip/Makefile help
 A target whose tool is missing prints a one line message naming the tool, points at this
 file, and exits with status 127. That is deliberate: a missing tool must be a visible
 failure, never a silent skip. In the checkout this tree was written in, the Verilator targets
-ran inside the container image described at the end of section 4; `sim-iverilog` was never run
-at all, and no make target was: the `openlane` and `setup-openlane` recipes call the two scripts
+ran inside the container image described at the end of section 4, `lint-topology` and
+`sim-topology` among them on 2026-11-10, with the output of those two recorded in section 2.4.1
+of `asic_chip/doc/verification_report.md`; `sim-iverilog` was never run
+at all, and nothing in that paragraph ran on the host: the `openlane` and `setup-openlane` recipes call the two scripts
 of section 5, and those scripts have both run, three times for the flow, which is where the
 layout numbers of the datasheet come from. `asic_chip/doc/verification_report.md` states which
 claim each of those facts supports.
@@ -560,7 +564,8 @@ claim each of those facts supports.
 
 - PowerShell has no `make` here. Run the generator and pytest directly, or use WSL, Git
   Bash or a container for the make targets, which are POSIX shell recipes. The Verilator
-  image carries its own `make` and C++ compiler, so `lint`, `sim-tb` and `sim-verilator` run
+  image carries its own `make` and C++ compiler, so `lint`, `sim-tb`, `sim-verilator`,
+  `lint-topology` and `sim-topology` run
   there unchanged, as shown at the end of section 4.
 - The generator writes LF line endings explicitly and UTF-8 without a byte order mark, on
   every platform, so the digests in `MANIFEST.json` match `sha256sum` output on Windows

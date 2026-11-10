@@ -5,9 +5,13 @@ Covers:
   2. TOPOLOGY_CTRL register packing, unpacking, and field definitions.
   3. Software auto-discovery and handshake logic in lllayer.
   4. MultiInstanceOrchestrator topology negotiation and dataset partitioning.
+  5. Cross layer gates: the register fields, the board the config declares and the
+     SystemVerilog switch under asic_chip, so the three of them cannot drift apart in
+     silence.
 """
 
 import json
+import re
 import pytest
 from pathlib import Path
 
@@ -27,7 +31,16 @@ def simulate_topology_router(
     rx_valid_ext: bool,
     rx_data_ext: int,
 ):
-    """Python behavioral reference of lingologos_topology_router.sv."""
+    """Python behavioral reference of the addressing rule of the switch interface.
+
+    This model is the one the interface was specified with: it decides in one step where a
+    frame goes and it hands the frame over without waiting. The registered switch in
+    asic_chip/rtl/core/lingologos_topology_router.sv is stricter, it consults the routing
+    mask, it refuses a destination that no channel of the die names, it takes two clock
+    cycles, and it pushes back on the port of the core. Those properties are checked by
+    the SystemVerilog bench asic_chip/sim/topology_testbench.sv, run through the
+    sim-topology target of asic_chip/Makefile.
+    """
     if standalone_mode:
         rx_valid_local = tx_valid_local
         rx_data_local = tx_data_local
@@ -190,3 +203,120 @@ def test_orchestrator_negotiates_topology_and_partitions_datasets():
         assert "datasetId" in env
         assert env["topologyCtrl"]["standalone"] == 0
         assert env["topologyCtrl"]["total_nodes"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Cross layer gates.
+#
+# The register, the board the config declares and the switch written in
+# SystemVerilog live in three different places. These tests read all three of
+# them and compare what they say, because a number that appears in only one of
+# them is a number that nobody checks.
+# ---------------------------------------------------------------------------
+
+TOPOLOGY_CONFIG = Path("config/topology.json")
+RTL_SWITCH = Path("asic_chip/rtl/core/lingologos_topology_router.sv")
+RTL_TESTBENCH = Path("asic_chip/sim/topology_testbench.sv")
+ASIC_MAKEFILE = Path("asic_chip/Makefile")
+ASIC_TOP = Path("asic_chip/rtl/top/lingologos_top.sv")
+OPENLANE_CONFIGS = (
+    Path("asic_chip/openlane/config.json"),
+    Path("asic_chip/openlane/config.bringup.json"),
+)
+
+
+def _rtl_parameter(text, name):
+    match = re.search(r"\b" + name + r"\s*=\s*([0-9]+)", text)
+    assert match is not None, "the switch does not parameterize " + name
+    return int(match.group(1))
+
+
+def test_switch_is_sized_by_the_register_it_is_wired_to():
+    """Every width of the switch is a width of TOPOLOGY_CTRL, and no field is dropped."""
+    assert RTL_SWITCH.is_file()
+    text = RTL_SWITCH.read_text(encoding="utf-8")
+    node_width = _rtl_parameter(text, "NODE_ID_WIDTH")
+    assert node_width == 4
+    assert _rtl_parameter(text, "MAX_NODES") == 1 << node_width
+    assert _rtl_parameter(text, "DATA_WIDTH") == 64
+
+    probe = TopologyCtrlRegister(standalone=1, node_id=0x0F, total_nodes=0x0F,
+                                 dataset_id=0x7F, routing_mask=0xFFFF)
+    packed = probe.pack()
+    assert packed == 0xFFFFFFFF
+    # The mask field of the register spans one bit per node id, and the switch has one
+    # channel per node id, so a bit of the mask and an index of a channel mean the same.
+    assert ((packed >> 16) & 0xFFFF).bit_length() <= _rtl_parameter(text, "MAX_NODES")
+    assert ((packed >> 1) & 0x0F) == (1 << node_width) - 1
+
+    port_match = re.search(
+        r"module\s+lingologos_topology_router\b[\s\S]*?\)\s*\(([\s\S]*?)\n\);",
+        text,
+    )
+    assert port_match is not None, "the port list of the switch was not found"
+    head = port_match.group(1)
+    for port in ("standalone", "node_id", "total_nodes", "routing_mask", "routing_error",
+                 "tx_valid", "tx_ready", "tx_dest", "tx_data", "rx_valid", "rx_ready",
+                 "rx_data", "link_tx_valid", "link_tx_ready", "link_rx_valid"):
+        assert re.search(r"\b" + port + r"\b", head) is not None, "no port " + port
+    # DATASET_ID names the shard of the corpus a die works on, which is a matter for the
+    # software on that die. The switch is not told about it and does not use it.
+    assert "DATASET" not in head.upper()
+
+
+def test_every_link_the_config_declares_is_a_direct_channel_of_the_switch():
+    """The single hop policy of the switch covers the board this config declares."""
+    declared = json.loads(TOPOLOGY_CONFIG.read_text(encoding="utf-8"))
+    names = [instance["id"] for instance in declared["instances"]]
+    hw_of = {name: index for index, name in enumerate(names)}
+    matrix = {rule["from"]: set(rule["to"]) for rule in declared["routingMatrix"]}
+
+    orch = MultiInstanceOrchestrator.from_config_file(
+        config_path=TOPOLOGY_CONFIG,
+        datasets_dir=Path("datasets"),
+    )
+    regs = orch.negotiate_topology()
+    assert set(regs) == set(names)
+
+    for name in names:
+        reg = regs[name]
+        expected = 0
+        for peer in matrix[name]:
+            expected |= 1 << hw_of[peer]
+        assert reg.routing_mask == expected
+
+        for bit in hw_of.values():
+            if (reg.routing_mask >> bit) & 1:
+                assert names[bit] in matrix[name]
+                assert names[bit] != name
+
+        # A die of this board has no path table and no relay: it hands a frame to the
+        # channel of the destination or it refuses the frame. That is only enough when
+        # every other die of the board is wired to it directly, which is what the mask
+        # says and what this check locks.
+        for other in names:
+            if other == name:
+                continue
+            assert (reg.routing_mask >> hw_of[other]) & 1, (
+                name + " is not wired to " + other
+                + ", so the switch of that die would have to relay a frame"
+            )
+
+
+def test_the_switch_is_linted_and_simulated_but_not_synthesized():
+    """The Makefile builds the switch, the place and route flow of this repo does not."""
+    assert RTL_TESTBENCH.is_file()
+    make = ASIC_MAKEFILE.read_text(encoding="utf-8")
+    assert RTL_SWITCH.as_posix().split("asic_chip/")[-1] in make, "the Makefile never reads the switch source"
+    assert RTL_TESTBENCH.as_posix().split("asic_chip/")[-1] in make, "the Makefile never reads the bench source"
+    for target in ("lint-topology:", "sim-topology:"):
+        assert target in make, "the Makefile declares no " + target + " target"
+
+    # Not instantiated in the top level and not listed in the source list of OpenLane:
+    # the switch is simulated, it has never been placed and routed. A commit that moves
+    # it into either list has to update the wording of the verification report too.
+    assert "lingologos_topology_router" not in ASIC_TOP.read_text(encoding="utf-8")
+    for path in OPENLANE_CONFIGS:
+        assert path.is_file()
+        listed = json.loads(path.read_text(encoding="utf-8")).get("VERILOG_FILES", [])
+        assert not any("topology_router" in entry for entry in listed)

@@ -80,13 +80,19 @@ The five internal gates of the generator, with the values it printed:
 
 ### 2.2 The Python gate suite
 
-`python -m pytest -v tests/` was run after the last change. The full suite reports 205
-tests, all PASSED, zero failures, zero errors; the last run printed `205 passed in 27.06s`,
+`python -m pytest -v tests/` was run after the last change. The full suite reports 208
+tests, all PASSED, zero failures, zero errors; the last run printed `208 passed in 30.14s`,
 of which about 16 seconds belong to the synthesis run that `tests/test_grammar_artifacts.py`
 performs once per session.
 Of those, 26 tests
 target `asic_chip/`: 20 in `tests/test_asic_compiler.py` and 6 in
-`tests/test_asic_core_firmware.py`. They are
+`tests/test_asic_core_firmware.py`. Three further tests in
+`tests/test_topology_router.py` read the RTL of the topology switch, the bench of section
+2.4.1 and the Makefile of this tree, and compare what those three files say with the register
+in `src/lingologos_orchestrator/topology_ctrl.py` and with the routing matrix of
+`config/topology.json`; they are the only tests in this tree that read that RTL, and the last
+of them fails if the module is moved into a synthesis file list while the wording of this
+report still says it was never synthesized. Those 26 ASIC tests are
 not unit tests of the generator: with one exception they never import it, they read the
 committed files and recompute the answers from a separate reference model
 (`tests/asic_reference_model.py`), which implements the dot product, the GF(2^8) field,
@@ -169,6 +175,45 @@ What that buys:
   instead of recompiling, and the log says `make[1]: Nothing to be done for 'default.'` for
   both. The lint line of the table is the fresh one: `Walltime 0.098 s`, `allocated 27.152
   MB`.
+
+#### 2.4.1 The topology switch, lint and simulation, on 2026-11-10
+
+`lingologos_topology_router.sv` is not instantiated in `lingologos_top.sv`, so none of the
+three runs above reads it. It has two targets of its own, `lint-topology` and `sim-topology`,
+and both ran in the same image on 2026-11-10, the checkout mounted at `/repo`:
+
+| Step | Command, as run in the container | Result, quoted from the tool |
+|---|---|---|
+| lint of the switch, and of the bench that drives it | `make -f asic_chip/Makefile lint-topology` | exit 0, no warning left, last line `topology switch lint clean`. Two elaborations: `Built from 0.038 MB sources in 3 modules, into 0.203 MB in 3 C++ files`, `Walltime 0.026 s`, and `Built from 0.082 MB sources in 4 modules, into 0.584 MB in 6 C++ files`, `Walltime 0.055 s` |
+| simulation of the bench | `make -f asic_chip/Makefile sim-topology` | build exit 0 from a clean directory, `Built from 0.082 MB sources in 4 modules, into 0.671 MB in 10 C++ files`, `Walltime 7.323 s (elab=0.003, cvt=0.087, bld=7.122)`. Run exit 0: `[INFO] step A, loopback on a one die board: deliveries 1, errors 0`, `[INFO] step B words at die 0: 0000000000000020 0000000000000030, deliveries 3 2 2`, `[INFO] step C, one frame with no neighbour for its destination: errors at die 0 = 1`, `[INFO] step D, blocked port of die 1: four frames absorbed, the fifth one refused`, `[INFO] step D words at die 1: 0000000000000050 0000000000000051 0000000000000052 0000000000000053 0000000000000054`, `[INFO] step D, deliveries at die 1: 7 frames, order preserved, no loss`, `[INFO] step E, a wire that does not match the mask: errors at die 3 = 1`, `checked 42 topology assertions on four dies, 0 mismatches`, `deliveries per die: 3 8 2 0, refusal pulses: 1 0 0 1`, `FINAL VERDICT: PASS`, `$finish at 443ns` |
+
+The bench, `asic_chip/sim/topology_testbench.sv`, instantiates four copies of the switch and
+wires the six links that the routing matrix of `config/topology.json` declares, so what runs
+is a fabric of dies and not a module in isolation. The five steps and what each one
+established, with the counters above as the evidence:
+
+| Step | Situation | What the run showed |
+|---|---|---|
+| A | one die board, `TOTAL_NODES` at one, destination 9 which is not on the board | the frame came back on the local receive port and no link channel moved: loopback is a mode of the switch, not a mask trick |
+| B | the declared board, die 0, 1 and 2 with the masks the orchestrator negotiates, die 3 with an empty mask | six frames, one per directed pair, all six delivered at the right die; no die ever drove a channel its mask does not name, and the undeclared die stayed silent |
+| C | one frame whose destination is not a declared neighbour | one `routing_error` pulse at the injecting die, no delivery anywhere: the switch refuses instead of dropping |
+| D | the delivery port of die 1 held low | four frames absorbed by the four buffer stages of the path, then the injection port of die 0 refused a fifth and held that refusal for three cycles. After the port was released all five words arrived in injection order, `0x50` to `0x54`, nothing lost and nothing doubled |
+| E | the wire of channel 2 of die 0 landed on die 3 instead of die 2 | die 3 refused the frame with one pulse and latched nothing while die 2 received nothing: a mask that disagrees with the wiring reports itself at run time |
+
+Two properties follow from those numbers, and one does not follow from anything here:
+
+- the pulse of step C and the silence of step E are the same mechanism seen from the two ends
+  of a link, which is what makes a wrong strap or a wrong mask an observable event instead of
+  a frame that never arrives;
+- the four frames of step D are the whole buffering this fabric has, and the refusal of the
+  fifth is the back pressure the core of the injecting die has to handle. The switch has no
+  queue and no retransmission: the core owns the retry;
+- what no run in this report shows is that switch inside silicon. It is not in
+  `lingologos_top.sv` and it is in the `VERILOG_FILES` list of neither OpenLane config, so no
+  timing, area or power figure of sections 2.5 to 2.8 describes it. The claim for this module
+  is lint clean and simulated, nothing more, and
+  `tests/test_topology_router.py::test_the_switch_is_linted_and_simulated_but_not_synthesized`
+  fails if the module is moved into the synthesis list without that wording changing.
 
 ### 2.5 The OpenLane 2 flow, run three times on 2026-11-09
 

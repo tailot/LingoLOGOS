@@ -8,8 +8,10 @@
 #   make -f asic_chip/Makefile check      prove the checked in files are reproducible
 #   make -f asic_chip/Makefile sim-verilator   C++ harness, Verilator, VCD dump
 #   make -f asic_chip/Makefile sim-tb          SystemVerilog testbench, Verilator
+#   make -f asic_chip/Makefile sim-topology    SystemVerilog testbench of the topology switch
 #   make -f asic_chip/Makefile sim-iverilog    same checks in Icarus Verilog
 #   make -f asic_chip/Makefile lint            Verilator lint, no simulation
+#   make -f asic_chip/Makefile lint-topology   Verilator lint of the topology switch alone
 #   make -f asic_chip/Makefile pytest          the Python gate suite
 #   make -f asic_chip/Makefile openlane        place and route at the 32.0 ns bring-up gate
 #   make -f asic_chip/Makefile openlane-spec   the same flow at the declared 4.0 ns budget
@@ -18,11 +20,13 @@
 #
 # Every target that needs a tool reports it plainly if the tool is missing. On
 # the machine this RTL was written on, Python and pytest are installed while
-# Verilator, Icarus, Yosys and OpenLane are not, so lint, sim-tb and
-# sim-verilator were run inside the container image verilator/verilator:latest
-# (Verilator 5.054, which carries make and a C++ compiler) and sim-iverilog and
-# openlane were never run at all. Section 2.4 of asic_chip/doc/
-# verification_report.md records those commands and their output.
+# Verilator, Icarus, Yosys and OpenLane are not, so lint, sim-tb, sim-verilator,
+# lint-topology and sim-topology were run inside the container image
+# verilator/verilator:latest (Verilator 5.054, which carries make and a C++
+# compiler) while sim-iverilog and openlane were never run at all. The topology
+# targets were run there on 2026-11-10 and their output is recorded in section
+# 2.4.1 of asic_chip/doc/verification_report.md, together with the commands that
+# produced it.
 # -----------------------------------------------------------------------------
 
 PYTHON ?= python3
@@ -37,6 +41,12 @@ RTL_CORE := $(ASIC)/rtl/core/rv32e_regfile.sv $(ASIC)/rtl/core/rv32e_core.sv
 RTL_TOP := $(ASIC)/rtl/top/lingologos_top.sv
 ALL_RTL := $(RTL_GENERATED) $(RTL_CORE) $(RTL_TOP)
 
+# The topology switch stands on its own: it is not instantiated in the top level and it
+# is not in the source list of the chip configuration, so it is linted and simulated by
+# its own targets and no synthesis run sees it.
+RTL_TOPOLOGY := $(ASIC)/rtl/core/lingologos_topology_router.sv
+TB_TOPOLOGY := $(ASIC)/sim/topology_testbench.sv
+
 # LL_DEBUG_PORTS exists only for simulation. Synthesis and OpenLane never see it,
 # so the dbg_ group never becomes a pad.
 VDEF := -DLL_DEBUG_PORTS
@@ -44,10 +54,10 @@ VOPT := -O2 --timescale 1ns/1ps -Wall -Wno-UNSIGNED -Wno-UNUSED -Wno-WIDTHTRUNC
 
 .DEFAULT_GOAL := help
 
-.PHONY: help gen check sim-verilator sim-tb sim-iverilog lint pytest openlane openlane-spec setup-openlane clean
+.PHONY: help gen check sim-verilator sim-tb sim-topology sim-iverilog lint lint-topology pytest openlane openlane-spec setup-openlane clean
 
 help:
-	@echo "LingoLOGOS ASIC targets: gen check sim-verilator sim-tb sim-iverilog lint pytest openlane openlane-spec setup-openlane clean"
+	@echo "LingoLOGOS ASIC targets: gen check sim-verilator sim-tb sim-topology sim-iverilog lint lint-topology pytest openlane openlane-spec setup-openlane clean"
 
 # The generator is the only place the datapath is described. It rebuilds the three
 # generated modules, the golden vector table and the core self-test table from the
@@ -77,6 +87,15 @@ sim-tb: gen
 	  $(ALL_RTL) $(ASIC)/sim/testbench.sv
 	$(OBJDIR)_tb/Vlingologos_testbench
 
+# The topology switch needs no generated RTL, so this target has no gen prerequisite:
+# the four dies it wires together are the switch itself, four times.
+sim-topology:
+	@command -v verilator >/dev/null 2>&1 || { echo "verilator not found, see asic_chip/doc/build_instructions.md"; exit 127; }
+	verilator --binary --timing $(VOPT) $(VDEF) \
+	  --top-module lingologos_topology_testbench -Mdir $(OBJDIR)_topology \
+	  $(RTL_TOPOLOGY) $(TB_TOPOLOGY)
+	$(OBJDIR)_topology/Vlingologos_topology_testbench
+
 sim-iverilog: gen
 	@command -v iverilog >/dev/null 2>&1 || { echo "iverilog not found, see asic_chip/doc/build_instructions.md"; exit 127; }
 	mkdir -p $(OBJDIR)_vvp
@@ -84,10 +103,18 @@ sim-iverilog: gen
 	  -o $(OBJDIR)_vvp/lingologos.vvp $(ALL_RTL) $(ASIC)/sim/testbench.sv
 	vvp $(OBJDIR)_vvp/lingologos.vvp
 
-lint:
+lint: lint-topology
 	@command -v verilator >/dev/null 2>&1 || { echo "verilator not found, see asic_chip/doc/build_instructions.md"; exit 127; }
 	verilator --lint-only $(VOPT) $(VDEF) --top-module lingologos_top $(ALL_RTL)
 	@echo "lint clean"
+
+# The switch alone, module and testbench, because the lint of the top level above never
+# pulls it in: the module is not instantiated in lingologos_top.sv.
+lint-topology:
+	@command -v verilator >/dev/null 2>&1 || { echo "verilator not found, see asic_chip/doc/build_instructions.md"; exit 127; }
+	verilator --lint-only $(VOPT) $(VDEF) --top-module lingologos_topology_router $(RTL_TOPOLOGY)
+	verilator --lint-only $(VOPT) $(VDEF) --top-module lingologos_topology_testbench $(RTL_TOPOLOGY) $(TB_TOPOLOGY)
+	@echo "topology switch lint clean"
 
 pytest:
 	$(PYTHON) -m pytest -v tests/
@@ -119,7 +146,7 @@ setup-openlane:
 	sh $(ASIC)/scripts/setup_openlane_flow.sh
 
 clean:
-	rm -rf $(OBJDIR) $(OBJDIR)_tb $(OBJDIR)_vvp
+	rm -rf $(OBJDIR) $(OBJDIR)_tb $(OBJDIR)_topology $(OBJDIR)_vvp
 	rm -f $(VCD) $(ASIC)/sim/*.vvp
 	rm -rf $(ASIC)/openlane/runs $(ASIC)/openlane/*.log
 	@echo "removed simulation and OpenLane build products"
