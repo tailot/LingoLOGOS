@@ -821,3 +821,55 @@ the configuration, that every executed encoding is inside the documented subset,
 encoding is the documented `x16` probe, that the emulated run reproduces every entry of
 `asic_chip/sim/core_self_test.mem`, that the run fits the harness cycle budget, and that data memory
 readback matches the model.
+
+---
+
+## 13. Distributed Multi-Instance Orchestrator (RFC LingoLOGOS-MULTI-ORCH-v1)
+
+### 13.1 Mathematical and Formal Formulation
+
+The communication network is formalized as a directed graph:
+
+$$G = (V, E)$$
+
+where:
+- $V = \{v_1, v_2, \dots, v_n\}$ is the finite set of autonomous node instances, each identified by an arbitrary identifier string (e.g., `agente_alfa`, `agente_beta`, `arbitro_logico`).
+- $E \subseteq V \times V$ represents the directed routing relations declared in the adjacency matrix `routingMatrix`. A transmission from node $u$ to node $v$ is admissible if and only if:
+
+$$(u, v) \in E$$
+
+If a node $u$ attempts to route an envelope to a recipient $w \notin \{v \in V \mid (u, v) \in E\}$, the centralized message broker intercepts the payload and aborts with a `RoutingError`.
+
+### 13.2 Volatile State and Temporal Invariants
+
+Time in the multi-instance network is modeled as a strictly discrete, volatile tick counter:
+
+$$\tau_k = k, \quad k \in \{1, 2, \dots, \text{maxTurns}\}$$
+
+- **Zero Timestamp Persistence Invariant**: Envelopes and request payloads are forbidden from persisting fixed wall-clock timestamps (`created_at`, `timestamp`). All temporal context is propagated exclusively through volatile state variables:
+
+$$\mathcal{S}_{\text{volatile}}^{(k)} = \langle \tau_k, \dots \rangle$$
+
+- **Isolation Invariant**: Each node $v_i \in V$ runs as an isolated OS process via the CLI interface `lllayer`. No node implementation code is imported as an in-process module. Inter-process communication is performed strictly over standard I/O streams using JSON-encoded envelopes.
+
+### 13.3 Formal SMT Verification with Z3
+
+For each transmission turn $k$ from node $u$ to node $v$, the orchestrator gathers:
+1. Node ontology declarations and axioms $\mathcal{O}_u$ from `datasets/{u}/ontology.smt2`.
+2. SMT declarations $\mathcal{D}_k$ and assertions $\mathcal{A}_k$ from the message envelope `smtConstraints`.
+
+The combined theory is evaluated under the Z3 SMT solver:
+
+$$\mathcal{T}_k = \mathcal{O}_u \cup \mathcal{D}_k \cup \mathcal{A}_k$$
+
+Before submission to Z3, symbol declarations in $\mathcal{D}_k$ are deduplicated against sort and function signatures in $\mathcal{O}_u$ to prevent re-declaration errors. The satisfiability verdict is computed:
+
+$$\mathrm{Check}(\mathcal{T}_k) \in \{\mathrm{sat}, \mathrm{unsat}, \mathrm{unknown}\}$$
+
+### 13.4 Termination Invariants
+
+The orchestrator evaluates termination condition $\mathcal{C}$ at each turn $k$:
+
+- **UNSAT Breaker**: If $\mathrm{Check}(\mathcal{T}_k) = \mathrm{unsat}$ and $\mathcal{C} \in \{\text{UNSAT\_BREAKER}, \text{Z3\_SAT\_CONVERGENCE\_OR\_UNSAT\_BREAKER}\}$, execution aborts immediately to prevent propagation of contradictory or safety-violating state transitions.
+- **SAT Convergence**: If $\mathrm{Check}(\mathcal{T}_k) = \mathrm{sat}$ continuously across all active edges $|E|$, consensus is certified and the session terminates successfully with `SAT_CONVERGENCE`.
+- **Turn Bound Exhaustion**: If $k = \text{maxTurns}$ is reached without convergence or breaker trip, the session halts with `MAX_TURNS_REACHED`.

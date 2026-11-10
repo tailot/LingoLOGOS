@@ -240,6 +240,23 @@ documentation cannot drift away from the code). Its contract:
 │   ├── asic_reference_model.py    # Helper, not a test: independent model of the ASIC datapath, GF field and RV32E core
 │   ├── test_asic_compiler.py      # Gates that recompute every numeric claim in the ASIC tree from the committed files
 │   └── test_asic_core_firmware.py # RV32E firmware emulation checked against the committed self test table
+├── config/
+│   └── topology.json              # Topology definition and routing matrix
+├── datasets/
+│   ├── agente_alfa/               # Datasets, SMT ontology, and GF grammar for node
+│   ├── agente_beta/
+│   └── arbitro_logico/
+├── src/
+│   ├── lingologos_orchestrator/   # Distributed multi-instance orchestrator (RFC LingoLOGOS-MULTI-ORCH-v1)
+│   │   ├── cli.py                 # CLI entrypoint for lingologos-orchestrator
+│   │   ├── lllayer.py             # Isolated CLI node wrapper process
+│   │   ├── node_runner.py         # Subprocess process isolation manager
+│   │   ├── orchestrator.py        # Centralized message broker & 4-phase lifecycle
+│   │   ├── schema.py              # Topology, envelope, and validation dataclasses
+│   │   └── verifier.py            # Z3 SMT solver and ontology verifier
+│   └── neuro_symbolic/
+├── tests/
+│   ├── test_orchestrator.py       # Orchestrator schema, routing, process isolation, and Z3 tests
 ├── AGENTS.md                      # Mandatory instructions for AI agents
 ├── pyproject.toml                 # Build metadata, packaging, and pytest configuration
 ├── requirements.txt               # Project dependencies
@@ -715,3 +732,72 @@ tools the build instructions describe and that this checkout does not carry; the
 above happened in WSL Ubuntu, in its own virtual environment, pulling its tools from a container
 image and its PDK from a download outside this tree. Each of those runs left its own directory under
 `asic_chip/openlane/runs/` in the tree it ran from, and none of those directories is committed.
+
+---
+
+## 13. Distributed Multi-Instance Orchestrator (RFC LingoLOGOS-MULTI-ORCH-v1)
+
+The multi-instance orchestrator coordinates $N$ concurrent, autonomous LingoLOGOS instances communicating over a directed graph $G = (V, E)$. Formal language generation and algebraic reasoning are constrained by Grammatical Framework (GF) concrete grammars and the Z3 SMT solver.
+
+### Architectural Metadata
+- **RFC Identifier**: `LingoLOGOS-MULTI-ORCH-v1`
+- **Interface Layer**: `lllayer` (CLI process wrapper)
+- **Logical Engine**: Z3 SMT Solver (algebraic constraint satisfiability)
+- **Formal Grammar**: Grammatical Framework (GF) (syntactic trees)
+
+### Architectural Principles
+1. **Node Decoupling and Isolated Processes**:
+   Nodes are never imported as internal Python modules. The orchestrator spawns and interacts with each node strictly as an isolated subprocess via standard I/O streams using the `lllayer` CLI wrapper. Node identifiers (e.g., `agente_alfa`, `agente_beta`, `arbitro_logico`) are fully arbitrary and never hardcoded in source code.
+2. **Volatile State and Time Management**:
+   Time and contextual state parameters are managed dynamically via discrete volatile ticks (`internalTimeTick`) passed in the envelope. No persistent or fixed timestamps are stored in request payloads.
+3. **Centralized Routing via Directed Graph**:
+   Nodes never communicate peer-to-peer directly. The orchestrator acts as a centralized asynchronous message broker, enforcing the `routingMatrix` defined in `config/topology.json`. Any route not in $E$ is rejected.
+4. **Filesystem Convention and Seed Payloads**:
+   Each declared node has an isolated workspace directory under `datasets/{node_id}/` containing:
+   - `ontology.smt2`: Node-specific SMT-LIB 2 sorts and declarations.
+   - `grammar.gf`: Grammatical Framework concrete syntax rules.
+   - `seed_payload.json`: Turn 0 seed envelope.
+
+### Envelope Protocol (Neuro-Symbolic Envelope)
+Communication between nodes uses a structured JSON envelope:
+```json
+{
+  "sender": "agente_alfa",
+  "recipient": "agente_beta",
+  "turn": 1,
+  "volatileState": {
+    "internalTimeTick": 1
+  },
+  "payload": {
+    "naturalLanguage": "State transition proposal under formal verification.",
+    "abstractSyntaxTree": "Transition (StateA StateB)",
+    "smtConstraints": {
+      "declarations": [
+        "(declare-sort State)",
+        "(declare-fun safe_transition (State State) Bool)"
+      ],
+      "assertions": [
+        "(assert (safe_transition s1 s2))"
+      ],
+      "z3Status": "sat"
+    }
+  }
+}
+```
+
+### Lifecycle Phases
+- **Phase 01: Static Validation**: Validates `topology.json` schema, checks presence of `datasets/{node_id}/` files (`ontology.smt2`, `grammar.gf`, `seed_payload.json`), and checks SMT syntax using Z3.
+- **Phase 02: Process Initialization**: Maps node IDs and prepares isolated subprocess runners via `lllayer`.
+- **Phase 03: Turn Loop ($k = 1 \dots \text{maxTurns}$)**: Dispatches messages across authorized edges $(u, v) \in E$, executes node $u$ via subprocess stdin/stdout, and verifies algebraic constraints against the node ontology using Z3.
+- **Phase 04: Termination**: Concludes session upon reaching logical convergence (SAT convergence), tripping an UNSAT breaker, or reaching `maxTurns`.
+
+### CLI Usage
+Run the orchestrator:
+```bash
+lingologos-orchestrator --config config/topology.json --datasets datasets/ --runtime-state runtime_state/
+```
+
+Execute an isolated node CLI turn directly:
+```bash
+lllayer --node-id agente_alfa --role proponent --node-dir datasets/agente_alfa < input_envelope.json
+```

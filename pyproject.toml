@@ -25,6 +25,10 @@ publish = [
     "huggingface_hub>=0.23.0",
 ]
 
+[project.scripts]
+lingologos-orchestrator = "lingologos_orchestrator.cli:main"
+lllayer = "lingologos_orchestrator.lllayer:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

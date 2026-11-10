@@ -1,0 +1,28 @@
+{
+  "$schema": "https://lingologos.spec/schemas/topology-v1.json",
+  "sessionId": "lingologos-multiagent-01",
+  "maxTurns": 15,
+  "terminationCondition": "Z3_SAT_CONVERGENCE_OR_UNSAT_BREAKER",
+  "instances": [
+    {
+      "id": "agente_alfa",
+      "executable": "lllayer",
+      "role": "proponent"
+    },
+    {
+      "id": "agente_beta",
+      "executable": "lllayer",
+      "role": "opponent"
+    },
+    {
+      "id": "arbitro_logico",
+      "executable": "lllayer",
+      "role": "validator"
+    }
+  ],
+  "routingMatrix": [
+    { "from": "agente_alfa", "to": ["agente_beta", "arbitro_logico"] },
+    { "from": "agente_beta", "to": ["agente_alfa", "arbitro_logico"] },
+    { "from": "arbitro_logico", "to": ["agente_alfa", "agente_beta"] }
+  ]
+}

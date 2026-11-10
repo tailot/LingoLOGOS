@@ -1,0 +1,21 @@
+{
+  "sender": "agente_alfa",
+  "turn": 0,
+  "volatileState": {
+    "internalTimeTick": 0
+  },
+  "payload": {
+    "naturalLanguage": "Inizio analisi formale del sistema.",
+    "abstractSyntaxTree": "StartAnalysis (SystemRoot)",
+    "smtConstraints": {
+      "declarations": [
+        "(declare-sort State)",
+        "(declare-fun safe_transition (State State) Bool)"
+      ],
+      "assertions": [
+        "(assert true)"
+      ],
+      "z3Status": "sat"
+    }
+  }
+}
