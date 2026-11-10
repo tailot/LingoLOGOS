@@ -13,3 +13,9 @@ asic_chip/** text eol=lf
 # between hosts.
 .gitattributes text eol=lf
 .github/** text eol=lf
+
+# Shell scripts are read by bash inside WSL and inside containers, and this checkout is
+# cloned with core.autocrlf enabled on Windows hosts. Without this pin, a Windows clone
+# hands bash a file whose every line ends in a carriage return, and bash reports it as a
+# syntax error far from the cause.
+*.sh text eol=lf
