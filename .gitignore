@@ -6,6 +6,9 @@ __pycache__/
 build/
 dist/
 
+# Volatile orchestrator runtime state directory
+runtime_state/
+
 # Dataset companion folder: corpus and tools are versioned here,
 # training outputs stay local.
 dataset/checkpoints/

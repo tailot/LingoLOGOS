@@ -1,0 +1,21 @@
+{
+  "sender": "arbitro_logico",
+  "turn": 0,
+  "volatileState": {
+    "internalTimeTick": 0
+  },
+  "payload": {
+    "naturalLanguage": "Arbitro logico inizializzato per validazione formale.",
+    "abstractSyntaxTree": "ArbitrateConsensus (ValidationRoot)",
+    "smtConstraints": {
+      "declarations": [
+        "(declare-sort State)",
+        "(declare-fun safe_transition (State State) Bool)"
+      ],
+      "assertions": [
+        "(assert true)"
+      ],
+      "z3Status": "sat"
+    }
+  }
+}

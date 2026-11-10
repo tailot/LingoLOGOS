@@ -1,0 +1,21 @@
+{
+  "sender": "agente_beta",
+  "turn": 0,
+  "volatileState": {
+    "internalTimeTick": 0
+  },
+  "payload": {
+    "naturalLanguage": "Sentinella pronta alla verifica dei vincoli di sicurezza.",
+    "abstractSyntaxTree": "InitMonitor (SafetyBoundary)",
+    "smtConstraints": {
+      "declarations": [
+        "(declare-sort State)",
+        "(declare-fun safe_transition (State State) Bool)"
+      ],
+      "assertions": [
+        "(assert true)"
+      ],
+      "z3Status": "sat"
+    }
+  }
+}
