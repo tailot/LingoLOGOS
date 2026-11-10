@@ -80,8 +80,10 @@ The five internal gates of the generator, with the values it printed:
 
 ### 2.2 The Python gate suite
 
-`python -m pytest -v tests/` was run after the last change. The full suite reports 184
-tests, all PASSED, zero failures, zero errors; the last run printed `184 passed in 9.91s`.
+`python -m pytest -v tests/` was run after the last change. The full suite reports 205
+tests, all PASSED, zero failures, zero errors; the last run printed `205 passed in 27.06s`,
+of which about 16 seconds belong to the synthesis run that `tests/test_grammar_artifacts.py`
+performs once per session.
 Of those, 26 tests
 target `asic_chip/`: 20 in `tests/test_asic_compiler.py` and 6 in
 `tests/test_asic_core_firmware.py`. They are

@@ -117,6 +117,8 @@ Evaluation compares the induced grammar with the ground-truth grammar of the con
 
 The synthesis process outputs discrete formal artifacts in JSON, YAML, and Grammatical Framework (`.gf`) formats, plus a machine-readable verification report (`artifacts/metrics.json`). The structure extracted after pruning ($\tau_{\text{prune}} = 0.01$) with per-non-terminal renormalization is stored in `artifacts/`:
 
+Five files, all of them written by `python src/neuro_symbolic/synthesize.py` and version-controlled so the formal claims stay auditable without a training run. `tests/test_grammar_artifacts.py` keeps them honest: once per session it runs the synthesis into a temporary folder and fails when a committed `grammar.json`, `grammar.yaml` or `DynamicGrammarIta.gf` no longer equals what the current code exports. The two numeric files stay out of that comparison because `grammar_weights.pt` and the measured values in `metrics.json` already differed in the eighth significant digit between two runs with the same seed, so the gates recorded in the report are checked instead of the digits.
+
 ### YAML Grammar (`artifacts/grammar.yaml`, seed 42 run)
 ```yaml
 grammar_metadata:
@@ -330,7 +332,7 @@ $$A \to a:\ \delta = e(a),\ m = e(a) \qquad A \to B\,C:\ \delta = \delta_B + \de
 | **Selectivity (negative controls)** | `verify_negative_controls` | 100% rejection of 200 non-Dyck strings | **PASS (200/200)** |
 | **Rule induction quality** | `gold_rule_f1` | $F_1 \ge 0.90$ under NT alignment | **PASS (1.000)** |
 | **Language inclusion** | Z3 SMT Solver | **UNSAT** on certificate $+ \neg G$ | **PASS (UNSAT)** |
-| **Unit / integration tests** | pytest | All tests PASSED | **PASS (184 passed)** |
+| **Unit / integration tests** | pytest | All tests PASSED | **PASS (205 passed)** |
 
 ---
 
@@ -393,7 +395,7 @@ pytest -v tests/
 ```
 The suite also carries the gates of the ASIC track described in section 12: `tests/test_asic_compiler.py`
 recomputes every numeric claim in `asic_chip/` from the committed files and
-`tests/test_asic_core_firmware.py` emulates the core firmware, so 184 tests pass in this
+`tests/test_asic_core_firmware.py` emulates the core firmware, and `tests/test_grammar_artifacts.py` re-runs the synthesis and compares the committed formal outputs, so 205 tests pass in this
 checkout with no HDL tool on the host. The ASIC steps that do need an external tool are
 documented in `asic_chip/doc/build_instructions.md`: Verilator 5.054 linted and simulated the
 design inside the image `verilator/verilator:latest`, OpenLane 2.3.10 with the sky130A PDK ran
@@ -690,7 +692,7 @@ refuses to start a place and route until `--check` passes, which is what keeps a
 
 ### 12.3 Verification status, executed against not run
 
-`python -m pytest -v tests/` in this checkout: **184 passed**, zero failures, zero errors.
+`python -m pytest -v tests/` in this checkout: **205 passed**, zero failures, zero errors; the synthesis that `tests/test_grammar_artifacts.py` performs once per session accounts for about 16 s of that wall time.
 Twenty six of those tests target the ASIC tree: twenty in `tests/test_asic_compiler.py`
 and six in `tests/test_asic_core_firmware.py`, plus the helper model in
 `tests/asic_reference_model.py` that recomputes the dot product, the GF field, the clause

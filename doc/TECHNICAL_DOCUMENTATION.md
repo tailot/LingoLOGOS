@@ -541,7 +541,7 @@ in `asic_chip/Makefile` and in `sim/sim_main.cpp` are relative to it.
 | --- | --- | --- | --- |
 | regenerate the generated RTL, both vector tables and the manifest | `python asic_chip/scripts/lingologos_compiler.py` | CPython, standard library only | EXECUTED, `FINAL VERDICT: PASS` |
 | prove the checked in files are the current ones | `python asic_chip/scripts/lingologos_compiler.py --check` | same | EXECUTED, adds the `RTL_matches_artifacts` gate |
-| run the gate suite required by `AGENTS.md` | `pytest -v tests/` | pytest | EXECUTED, 200 passed |
+| run the gate suite required by `AGENTS.md` | `pytest -v tests/` | pytest | EXECUTED, 205 passed |
 | lint and infer latches | `verilator --lint-only ... -DLL_DEBUG_PORTS --top-module lingologos_top` | Verilator 5.006 or later | EXECUTED in the image `verilator/verilator:latest`, Verilator 5.054, through `make -f asic_chip/Makefile lint`: exit 0, no warning left. NOT RUN on the host, where there is no Verilator and no `make` |
 | replay the 304 golden rows against Verilog | `verilator --cc --exe --build ... sim/sim_main.cpp` | Verilator and a C++ compiler | EXECUTED in that image, through `make -f asic_chip/Makefile sim-verilator`: 304 rows plus the core self test, 0 mismatches, `FINAL VERDICT: PASS`, 91 clock cycles for the self test, VCD written |
 | run the SystemVerilog testbench | `verilator --binary --timing ...` | Verilator | EXECUTED in that image, through `make -f asic_chip/Makefile sim-tb`: same checks, same verdict |
@@ -733,7 +733,7 @@ To maintain high engineering and academic standards:
 
 ### 4.3 Repository Hygiene
 - Never commit `*.pyc` bytecode or `__pycache__/` folders.
-- Store trained weights strictly under `artifacts/grammar_weights.pt`; keep `artifacts/metrics.json` next to the grammars so every exported artifact stays auditable. `artifacts/` is version-controlled and is overwritten by each `synthesize.py` run.
+- Store trained weights strictly under `artifacts/grammar_weights.pt`; keep `artifacts/metrics.json` next to the grammars so every exported artifact stays auditable. `artifacts/` is version-controlled and is overwritten by each `synthesize.py` run. `tests/test_grammar_artifacts.py` locks that state: it runs the synthesis into a temporary folder and refuses a checkout whose committed grammar JSON, YAML or GF module no longer equals what the current code exports, and it checks the four gates of the report rather than its measured digits, since two runs with the same seed differed there in the eighth significant digit. The folder is load-bearing beyond that track: gate 3 of the ASIC suite reads `artifacts/grammar.json` for the terminal set it compares with the alphabet of the generated automaton.
 
 ### 4.4 Known Limitations (measured, not asserted)
 1. **Induction from random initialization is not yet solved.** With `--init random` (120 epochs, same optimizer
@@ -764,7 +764,7 @@ To maintain high engineering and academic standards:
 9. **No electrical characterization.** Absolute maximum ratings, supply current ranges and junction temperature limits are not characterized, and the package entry in `asic_chip/config.json` is a declared body chosen to fit 146 signal bits plus the declared power pins, not a purchased part.
 
 ### 4.5 Coverage of the Test Suite
-`tests/` (184 tests collected, 158 of them outside the two ASIC files of section 1.10) locks,
+`tests/` (205 tests collected, 179 of them outside the two ASIC files of section 1.10) locks,
 in particular: the distribution invariant for the parser and for the
 extracted grammar; inside vs Viterbi agreement; post-pruning renormalization against
 `probability_pre_pruning`; disjoint train/test split; the corrected semantics of
