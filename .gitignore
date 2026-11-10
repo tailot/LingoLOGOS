@@ -28,3 +28,15 @@ asic_chip/sim/*.vvp
 asic_chip/openlane/runs/
 asic_chip/openlane/*.log
 
+# Exported fabrication and board artifacts, produced by
+# asic_chip/scripts/export_artifacts.py. The tree lives outside the versioned
+# sources and can be regenerated from any OpenLane run, so it is never
+# committed. The layout patterns below also keep a GDS, LEF or DEF that was
+# dropped somewhere else in the tree out of the index, which is what the
+# export specification asks for. A copy exported to the Windows desktop with
+# the --desktop flag is outside this repository entirely.
+export_artifacts/
+*.gds
+*.lef
+*.def
+

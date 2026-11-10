@@ -221,11 +221,52 @@ else
     fi
 fi
 
+# -----------------------------------------------------------------------------
+# Artifact export, the step the board level artifact specification asks for after
+# the flow: the factory tree (GDSII, LEF, DEF, SDC, the signoff reports) and the
+# board tree (gate level netlists, the node netlist and the board wrapper) are
+# written to export_artifacts/, outside every versioned source and ignored by
+# .gitignore. The exporter looks for the newest run under the runs directory next
+# to the configuration file, which is the directory named above, so it needs no
+# path from here. When the flow did not exit cleanly the export is asked to
+# tolerate missing artifacts: a run stopped by a signoff checker never reached the
+# streamout steps, and the reports it did write are exactly the part worth keeping.
+EXPORT_STATUS=0
+PYTHON_BIN=""
+for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+        PYTHON_BIN="$candidate"
+        break
+    fi
+done
+if [ -z "$PYTHON_BIN" ]; then
+    echo "[WARN] no python3 on PATH, so the artifact export did not run."
+    echo "[WARN] Rerun it by hand when Python is available:"
+    echo "[WARN]   python3 asic_chip/scripts/export_artifacts.py"
+elif [ "$FLOW_KIND" -eq 1 ] && [ ! -d "$DESIGN_DIR/runs/$TAG" ]; then
+    echo "[WARN] no run directory at $DESIGN_DIR/runs/$TAG, so the artifact export did not run."
+else
+    if [ "$FLOW_STATUS" -ne 0 ]; then
+        echo "[INFO] exporting artifacts of the newest run, tolerating the outputs a stopped flow never wrote"
+        "$PYTHON_BIN" "$ASIC_DIR/scripts/export_artifacts.py" --allow-missing || EXPORT_STATUS=$?
+    else
+        echo "[INFO] exporting artifacts of the newest run"
+        "$PYTHON_BIN" "$ASIC_DIR/scripts/export_artifacts.py" || EXPORT_STATUS=$?
+    fi
+fi
+
 if [ "$FLOW_STATUS" -ne 0 ]; then
     echo "[INFO] the flow did not exit cleanly, status $FLOW_STATUS. A deferred error from a"
     echo "[INFO] signoff checker is the reported result of the run, not a crash: read the"
     echo "[INFO] manufacturability report named above and the corner tables in the step"
     echo "[INFO] directory of the static timing analysis after place and route."
+fi
+if [ "$FLOW_STATUS" -eq 0 ] && [ "$EXPORT_STATUS" -ne 0 ]; then
+    echo "[FAIL] the flow exited cleanly but the artifact export did not, status"
+    echo "[FAIL] $EXPORT_STATUS: an artifact the export specification requires was not found in the"
+    echo "[FAIL] run directory, so the export tree is incomplete. The manifest written next to it"
+    echo "[FAIL] names every entry and every miss, and the exporter has no other reason to fail."
+    exit "$EXPORT_STATUS"
 fi
 exit "$FLOW_STATUS"
 

@@ -16,6 +16,8 @@
 #   make -f asic_chip/Makefile openlane        place and route at the 32.0 ns bring-up gate
 #   make -f asic_chip/Makefile openlane-spec   the same flow at the declared 4.0 ns budget
 #   make -f asic_chip/Makefile setup-openlane  one command: OpenLane plus sky130A setup, then the flow
+#   make -f asic_chip/Makefile export   GDSII, LEF, DEF, SDC, signoff reports, netlists and
+#                                       the board wrapper of the newest run, in export_artifacts/
 #   make -f asic_chip/Makefile clean
 #
 # Every target that needs a tool reports it plainly if the tool is missing. On
@@ -54,10 +56,10 @@ VOPT := -O2 --timescale 1ns/1ps -Wall -Wno-UNSIGNED -Wno-UNUSED -Wno-WIDTHTRUNC
 
 .DEFAULT_GOAL := help
 
-.PHONY: help gen check sim-verilator sim-tb sim-topology sim-iverilog lint lint-topology pytest openlane openlane-spec setup-openlane clean
+.PHONY: help gen check sim-verilator sim-tb sim-topology sim-iverilog lint lint-topology pytest openlane openlane-spec setup-openlane export clean
 
 help:
-	@echo "LingoLOGOS ASIC targets: gen check sim-verilator sim-tb sim-topology sim-iverilog lint lint-topology pytest openlane openlane-spec setup-openlane clean"
+	@echo "LingoLOGOS ASIC targets: gen check sim-verilator sim-tb sim-topology sim-iverilog lint lint-topology pytest openlane openlane-spec setup-openlane export clean"
 
 # The generator is the only place the datapath is described. It rebuilds the three
 # generated modules, the golden vector table and the core self-test table from the
@@ -145,8 +147,25 @@ openlane-spec: gen
 setup-openlane:
 	sh $(ASIC)/scripts/setup_openlane_flow.sh
 
+# The artifact export the board level export specification asks the flow to be
+# followed by: the factory tree of GDSII, LEF, DEF, SDC and signoff reports, and the
+# board tree of gate level netlists, the node netlist and the structural board
+# wrapper, all under export_artifacts/ at the repository root, which .gitignore keeps
+# out of the index. The exporter takes the newest run from the runs directory next to
+# the configuration file, so after make openlane this target needs nothing else.
+# EXPORT_ARGS reaches the exporter as it is: the place and route of this checkout ran
+# in the Linux copy of the repository under WSL, whose runs are not next to this
+# Makefile, so the export of that flow was run as
+#   make -f asic_chip/Makefile export EXPORT_ARGS=--runs-dir\ /home/tailot/LingoLOGOS/asic_chip/openlane/runs
+# and --desktop writes the tree to the Windows desktop instead, which the exporter
+# resolves through wslpath because the Windows path is not visible inside the WSL
+# filesystem.
+export:
+	$(PYTHON) $(ASIC)/scripts/export_artifacts.py $(EXPORT_ARGS)
+
 clean:
 	rm -rf $(OBJDIR) $(OBJDIR)_tb $(OBJDIR)_topology $(OBJDIR)_vvp
 	rm -f $(VCD) $(ASIC)/sim/*.vvp
 	rm -rf $(ASIC)/openlane/runs $(ASIC)/openlane/*.log
-	@echo "removed simulation and OpenLane build products"
+	rm -rf export_artifacts
+	@echo "removed simulation, OpenLane build products and the exported artifact tree"
