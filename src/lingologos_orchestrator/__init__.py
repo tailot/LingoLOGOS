@@ -19,6 +19,7 @@ from .schema import (
     StaticValidationError,
     SMTVerificationError,
 )
+from .topology_ctrl import TopologyCtrlRegister
 from .verifier import Z3Verifier, SMTVerificationResult
 from .node_runner import NodeProcessRunner, ProcessExecutionError
 from .orchestrator import MultiInstanceOrchestrator, ExecutionResult, TurnRecord
@@ -33,6 +34,7 @@ __all__ = [
     "SMTConstraints",
     "Payload",
     "Envelope",
+    "TopologyCtrlRegister",
     "OrchestratorError",
     "SchemaValidationError",
     "RoutingError",

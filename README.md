@@ -801,3 +801,17 @@ Execute an isolated node CLI turn directly:
 ```bash
 lllayer --node-id agente_alfa --role proponent --node-dir datasets/agente_alfa < input_envelope.json
 ```
+
+---
+
+## 14. Edge-NSAC Dynamic Board Topology (Single-Chip vs Multi-Chip)
+
+LingoLOGOS supports dynamic hardware topology switching on board via the `TOPOLOGY_CTRL` CSR register and the `lingologos_topology_router.sv` hardware routing module:
+
+- **Single-Chip Mode (Standalone)**:
+  `TOPOLOGY_CTRL.STANDALONE = 1`. High-speed SerDes links are clock-gated for low power, and local transmission is routed directly to local reception via internal loopback. Local Z3 SMT and GF validation operate autonomously on the primary dataset.
+- **Multi-Chip Mode (Distributed Mesh)**:
+  `TOPOLOGY_CTRL.STANDALONE = 0`. Discovers $N-1$ neighboring nodes, reads physical node strapping (`NODE_ID`), and routes traffic across board traces or locally based on destination node ID matching. Each chip processes assigned dataset shards (`DATASET_ID`).
+
+### Windows PowerShell & WSL Bridge
+For cross-platform development on Windows host with isolated Linux execution, `.venv-train/Scripts/Activate.ps1` (and `scripts/Activate.ps1`) provides idempotent WSL environment bootstrap and auto-sync for dependencies and CLI tools.

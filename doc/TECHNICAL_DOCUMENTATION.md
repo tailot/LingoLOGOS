@@ -873,3 +873,70 @@ The orchestrator evaluates termination condition $\mathcal{C}$ at each turn $k$:
 - **UNSAT Breaker**: If $\mathrm{Check}(\mathcal{T}_k) = \mathrm{unsat}$ and $\mathcal{C} \in \{\text{UNSAT\_BREAKER}, \text{Z3\_SAT\_CONVERGENCE\_OR\_UNSAT\_BREAKER}\}$, execution aborts immediately to prevent propagation of contradictory or safety-violating state transitions.
 - **SAT Convergence**: If $\mathrm{Check}(\mathcal{T}_k) = \mathrm{sat}$ continuously across all active edges $|E|$, consensus is certified and the session terminates successfully with `SAT_CONVERGENCE`.
 - **Turn Bound Exhaustion**: If $k = \text{maxTurns}$ is reached without convergence or breaker trip, the session halts with `MAX_TURNS_REACHED`.
+
+---
+
+## 14. Edge-NSAC Dynamic Board Topology (Single-Chip vs Multi-Chip)
+
+The hardware infrastructure and routing architecture configure the computation topology dynamically, preserving and extending the neuro-symbolic engine (RTL synthesis, Z3 SMT solver, and GF grammar verification) to multi-dataset processing via partitioning, dynamic loading, and parallel mapping.
+
+### 14.1 Operational Modes
+- **Single-Chip / Single-Dataset (Standalone Mode)**:
+  - External SerDes and high-speed transceivers are placed into low-power clock gating.
+  - Internal loopback routes `tx_local` directly to `rx_local`.
+  - The node executes SMT validation and GF syntax pipelines locally on the primary dataset.
+- **Multi-Chip / Multi-Dataset (Distributed Mode)**:
+  - An array of $N$ interconnected chips processes partitioned or parallel dataset shards.
+  - Each chip acquires physical identity from hardware strapping pins `HARDWARE_NODE_ID[3:0]`.
+  - Compute roles are allocated dynamically (e.g., Agente Alfa proponent, Agente Beta opponent, Arbitro Logico validator).
+
+### 14.2 Hardware Router Module: `lingologos_topology_router.sv`
+The switchable hardware router is implemented in `asic_chip/rtl/core/lingologos_topology_router.sv`:
+```systemverilog
+module lingologos_topology_router #(
+    parameter int NODE_ID_WIDTH = 4,
+    parameter int DATA_WIDTH    = 64
+)(
+    input  logic                     clk,
+    input  logic                     rst_n,
+    input  logic                     standalone_mode,
+    input  logic [NODE_ID_WIDTH-1:0] current_node_id,
+    input  logic                     tx_valid_local,
+    input  logic [NODE_ID_WIDTH-1:0] tx_dest_node,
+    input  logic [DATA_WIDTH-1:0]    tx_data_local,
+    output logic                     tx_ready_local,
+    output logic                     rx_valid_local,
+    output logic [DATA_WIDTH-1:0]    rx_data_local,
+    input  logic                     rx_ready_local,
+    input  logic                     rx_valid_ext,
+    input  logic [DATA_WIDTH-1:0]    rx_data_ext,
+    output logic                     tx_valid_ext,
+    output logic [DATA_WIDTH-1:0]    tx_data_ext
+);
+...
+```
+
+### 14.3 CSR Control Register: `TOPOLOGY_CTRL`
+The 32-bit `TOPOLOGY_CTRL` register controls the router and dataset routing configuration:
+
+| Bit Range | Field Name | Access | Description |
+| :--- | :--- | :--- | :--- |
+| **0** | `STANDALONE` | R/W | **1:** Internal loopback; **0:** External inter-chip mesh links. |
+| **4:1** | `NODE_ID` | R | Physical node identifier read from strapping pins. |
+| **8:5** | `TOTAL_NODES` | R/W | Total chips detected on board (1 for standalone, N for cluster). |
+| **15:9** | `DATASET_ID` | R/W | Logical dataset shard index assigned to this chip. |
+| **31:16** | `ROUTING_MASK` | R/W | Forwarding mask for adjacent nodes. |
+
+### 14.4 Software Auto-Discovery and Handshake Flow (`lllayer`)
+When `lllayer` initialises on a node:
+1. **Strapping Read**: Obtains `NODE_ID` from hardware pins.
+2. **Board Network Probing**: Sends probing packets over external links.
+   - **Timeout (0 peers)**: Fallback to Standalone Mode (`TOPOLOGY_CTRL.STANDALONE = 1`, `DATASET_ID = 0`, local autonomous validation).
+   - **Responses from $N-1$ peers**: Multi-Chip Mode (`TOPOLOGY_CTRL.STANDALONE = 0`, `TOTAL_NODES = N`, partition dataset shards across `DATASET_ID`, assign distributed roles).
+
+### 14.5 Developer Environment Automation: PowerShell & WSL Bridge
+The script `Activate.ps1` (`.venv-train/Scripts/Activate.ps1` and `scripts/Activate.ps1`) establishes an idempotent bridge from Windows PowerShell into the WSL Ubuntu environment:
+1. Converts the Windows project path to WSL format via `wslpath -u`.
+2. Checks for and idempotently creates `.venv-wsl` if missing.
+3. Activates `.venv-wsl` and installs Python dependencies from `requirements.txt`.
+4. Launches an interactive bash login shell ready for `lllayer` and Verilator execution.

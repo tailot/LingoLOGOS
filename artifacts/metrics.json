@@ -32,18 +32,18 @@
     "max_length": 12
   },
   "metrics_train": {
-    "mean_nll_per_symbol": 1.0684139067126859,
-    "ppl_per_symbol": 2.910759101282412,
+    "mean_nll_per_symbol": 1.0684138694117147,
+    "ppl_per_symbol": 2.9107589927082724,
     "model_coverage": 1.0,
     "rule_sparsity": 0.9172413793103448,
-    "max_lhs_mass_error": 1.1920928955078125e-07
+    "max_lhs_mass_error": 5.960464477539063e-08
   },
   "metrics_test": {
-    "mean_nll_per_symbol": 1.0505817707138831,
-    "ppl_per_symbol": 2.859314099484189,
+    "mean_nll_per_symbol": 1.0505817406105273,
+    "ppl_per_symbol": 2.8593140134092403,
     "model_coverage": 1.0,
     "rule_sparsity": 0.9172413793103448,
-    "max_lhs_mass_error": 1.1920928955078125e-07
+    "max_lhs_mass_error": 5.960464477539063e-08
   },
   "grammar": {
     "num_rules": 9,
