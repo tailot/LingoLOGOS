@@ -41,7 +41,7 @@ that are missing are in `doc/PURE_MODEL_ROADMAP.md` at the repository root.
 | `corpus/` | the structural words of every item, for grammar induction |
 | `templates/` | the 50 sentence patterns and the multilingual lexicon behind the items |
 | `configs/` | split definitions, one per language plus the combined one |
-| `tools/` | generator, validator, grammar induction, tokenizer learning, mask verification |
+| `tools/` | generator, validator, grammar induction, tokenizer learning, mask verification, plus the shared root probe `corpus_paths.py` |
 
 Every item is a parallel group: the same meaning in the five languages, with the
 identical logical form. 2,698 distinct meanings, 26,980 language views of them,
@@ -50,16 +50,23 @@ identical logical form. 2,698 distinct meanings, 26,980 language views of them,
 ## Quick start
 
 ```bash
-python dataset/tools/validate_dataset.py      # re-checks every consistency rule
-python dataset/tools/train_tokenizer.py       # learns the vocabulary from the training split
-python dataset/tools/verify_masking.py        # checks the symbolic decoding mask, gates M1-M5
-python dataset/tools/train_grammar.py         # induces the grammar of the algebra
+python datasets/multilingual/tools/validate_dataset.py      # re-checks every consistency rule
+python datasets/multilingual/tools/train_tokenizer.py       # learns the vocabulary from the training split
+python datasets/multilingual/tools/verify_masking.py        # checks the symbolic decoding mask, gates M1-M5
+python datasets/multilingual/tools/train_grammar.py         # induces the grammar of the algebra
 ```
 
-Outputs go to `dataset/checkpoints/`, which stays out of git: the learned vocabulary in
+Outputs go to `datasets/multilingual/checkpoints/`, which stays out of git: the learned vocabulary in
 `checkpoints/tokenizer/tokenizer.json`, its gate report in `checkpoints/tokenizer/metrics.json`,
 the mask report in `checkpoints/masking/masking_metrics.json`, the grammar in
 `checkpoints/grammar/`.
+
+Those commands run from any working directory, and this folder does not have
+to sit at the path above: each tool walks up from its own file to find the
+corpus (marker `templates/operators.json`) and the repository root (marker
+`pyproject.toml` with `src`), so moving or renaming the folder needs no source
+change. `LINGOLOGOS_DATASET_ROOT` and `LINGOLOGOS_REPO_ROOT` redirect the two
+probes when the corpus lives outside this repository.
 
 This folder is also published as a release of the repository, free to download: the
 first release is tagged `dataset-v1` and the tags increment from there (`dataset-v2`,

@@ -2,15 +2,15 @@
 
 The mask in ``src/neuro_symbolic/masking.py`` is what removes structural
 hallucination, so it gets the same kind of hard acceptance gates the rest of the
-repository uses. Run it after ``dataset/tools/train_tokenizer.py``, because gate
+repository uses. Run it after ``datasets/multilingual/tools/train_tokenizer.py``, because gate
 M5 works on the learned vocabulary.
 
 Usage:
-    python dataset/tools/train_tokenizer.py
-    python dataset/tools/verify_masking.py
-    python dataset/tools/verify_masking.py --samples 400 --seed 7
-    python dataset/tools/verify_masking.py --refine
-    python dataset/tools/verify_masking.py --list-only
+    python datasets/multilingual/tools/train_tokenizer.py
+    python datasets/multilingual/tools/verify_masking.py
+    python datasets/multilingual/tools/verify_masking.py --samples 400 --seed 7
+    python datasets/multilingual/tools/verify_masking.py --refine
+    python datasets/multilingual/tools/verify_masking.py --list-only
 
 Gates
 -----
@@ -39,11 +39,12 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Sequence
 
 HERE = Path(__file__).resolve().parent
-DATASET_ROOT = HERE.parent
-REPO_ROOT = DATASET_ROOT.parent
-for entry in (str(REPO_ROOT), str(REPO_ROOT / "src"), str(HERE)):
-    if entry not in sys.path:
-        sys.path.insert(0, entry)
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+from corpus_paths import bootstrap  # noqa: E402
+
+REPO_ROOT, DATASET_ROOT = bootstrap(HERE)
 
 from neuro_symbolic.masking import (  # noqa: E402
     AlgebraMask,
@@ -400,7 +401,7 @@ def main(argv: List[str]) -> int:
     tokenizer_path = Path(args.tokenizer)
     if not tokenizer_path.exists():
         print("M5 skipped: no learned tokenizer at " + str(tokenizer_path))
-        print("run python dataset/tools/train_tokenizer.py first")
+        print("run python datasets/multilingual/tools/train_tokenizer.py first")
         gates["M5_token_level_protocol"] = False
         scores["tokenizer_file"] = str(tokenizer_path)
     else:

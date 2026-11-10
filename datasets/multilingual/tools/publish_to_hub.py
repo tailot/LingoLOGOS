@@ -15,8 +15,8 @@ not land in shell history or in the repository.
 
 Usage
 -----
-    python dataset/tools/publish_to_hub.py --dry-run
-    python dataset/tools/publish_to_hub.py --upload --repo tailot/lingologos-pure-1
+    python datasets/multilingual/tools/publish_to_hub.py --dry-run
+    python datasets/multilingual/tools/publish_to_hub.py --upload --repo tailot/lingologos-pure-1
 
 The gate report must carry ``final_verdict`` equal to ``PASS`` unless
 ``--allow-ungated`` is given, in which case the card says so explicitly.
@@ -34,11 +34,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 HERE = Path(__file__).resolve().parent
-DATASET_ROOT = HERE.parent
-REPO_ROOT = DATASET_ROOT.parent
-for entry in (str(REPO_ROOT), str(REPO_ROOT / "src"), str(HERE)):
-    if entry not in sys.path:
-        sys.path.insert(0, entry)
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+from corpus_paths import bootstrap  # noqa: E402
+
+REPO_ROOT, DATASET_ROOT = bootstrap(HERE)
 
 import torch  # noqa: E402
 
@@ -421,7 +422,7 @@ def model_card(
     lines.append(
         "Every step goes through ``mask_logits``, which sets each illegal continuation to minus "
         "infinity; ``neuro_symbolic.training.generate_batch`` does the same for a whole batch at "
-        "once, and ``dataset/tools/evaluate_model.py`` is a complete working caller."
+        "once, and ``datasets/multilingual/tools/evaluate_model.py`` is a complete working caller."
     )
     lines.append("")
     lines.append("## What is not in this model")

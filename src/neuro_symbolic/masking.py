@@ -19,7 +19,7 @@ Two levels:
   algebra and the ``<RULE_START>`` / ``<RULE_END>`` protocol markers, and applies
   the mask to a logits vector.
 
-The serialization convention comes from ``dataset/tools/logic_map.py``: the stored
+The serialization convention comes from ``datasets/multilingual/tools/logic_map.py``: the stored
 bracket word of a tree is exactly ``" ".join(stream_of_tree(node))``.
 """
 
@@ -82,7 +82,7 @@ def parse_algebra(text: str) -> Dict[str, Any]:
 
     Structural only: brackets must balance and a round node must start with a
     name, but the operator arity is not checked here. That stays with the caller
-    (``dataset/tools/logic_map.check_tree``) and with :class:`AlgebraMask`, which
+    (``datasets/multilingual/tools/logic_map.check_tree``) and with :class:`AlgebraMask`, which
     refuses a wrong arity while the token is still being chosen.
     """
     symbols = tokenize_algebra(text)

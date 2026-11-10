@@ -30,11 +30,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Sequence, Set, Tuple
 
 HERE = Path(__file__).resolve().parent
-DATASET_ROOT = HERE.parent
-REPO_ROOT = DATASET_ROOT.parent
-for entry in (str(REPO_ROOT), str(REPO_ROOT / "src"), str(HERE)):
-    if entry not in sys.path:
-        sys.path.insert(0, entry)
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+from corpus_paths import bootstrap  # noqa: E402
+
+REPO_ROOT, DATASET_ROOT = bootstrap(HERE)
 
 import logic_map  # noqa: E402
 
@@ -112,7 +113,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--no-z3", action="store_true", help="skip the formal pass of gate E3")
     parser.add_argument("--no-ablation", action="store_true", help="skip gate E5")
     parser.add_argument("--no-refine", action="store_true", help="do not narrow the mask by argument kind")
-    parser.add_argument("--out", default="", help="report path, by default dataset/checkpoints/evaluation")
+    parser.add_argument("--out", default="", help="report path, by default datasets/multilingual/checkpoints/evaluation")
     return parser.parse_args(argv)
 
 

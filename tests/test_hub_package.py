@@ -2,7 +2,7 @@
 
 Three layers are covered: the safetensors serialization of the model, the JSON
 specification of the algebra mask, and the packaging tool in
-``dataset/tools`` that assembles the release around a gate report. No test here
+``datasets/multilingual/tools`` that assembles the release around a gate report. No test here
 reaches the network: uploading is exercised only through the package builder.
 """
 
@@ -17,7 +17,12 @@ import pytest
 import torch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-TOOLS = REPO_ROOT / "dataset" / "tools"
+TOOLS = next(
+    (p for p in sorted((REPO_ROOT / "datasets").glob("*/tools")) if (p / "publish_to_hub.py").is_file()),
+    None,
+)
+if TOOLS is None:
+    raise LookupError("no corpus tools folder carrying publish_to_hub.py under datasets")
 for entry in (str(REPO_ROOT), str(REPO_ROOT / "src"), str(TOOLS)):
     if entry not in sys.path:
         sys.path.insert(0, entry)

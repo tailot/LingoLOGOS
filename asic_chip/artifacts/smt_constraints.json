@@ -44,7 +44,7 @@
       "data inputs are themselves gates), because the four result lanes of the datasheet pin",
       "table are four clause slots and slots 2 and 3 would otherwise be constant zero.",
       "These four clauses are a hardware test network. They are not the compiled form of the",
-      "Z3 assertions produced by dataset/tools/logic_map.py: no such compiler exists here."
+      "Z3 assertions produced by datasets/multilingual/tools/logic_map.py: no such compiler exists here."
     ]
   }
 }

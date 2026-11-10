@@ -129,8 +129,8 @@ standard library.
   frequency, ties broken by the pair itself in ascending order, is appended repeatedly until the
   target size is reached, no mergeable pair is left, or the best pair falls below `min_frequency`.
   `stop_reason` records which case happened.
-- **Measured behaviour on the shipped corpus** (`python dataset/tools/train_tokenizer.py`, gate
-  output in `dataset/checkpoints/tokenizer/metrics.json`): 72,840 training texts and 5,214,389
+- **Measured behaviour on the shipped corpus** (`python datasets/multilingual/tools/train_tokenizer.py`, gate
+  output in `datasets/multilingual/checkpoints/tokenizer/metrics.json`): 72,840 training texts and 5,214,389
   pre-tokenized units give 1,578 word types and 3,040,076 atomic units (268 atomic types), and the
   vocabulary **saturates at 3,921 entries with 3,578 merges** (`stop_reason: no mergeable pair
   left`). A target of 8,000 to 32,000 pieces, as usually written for text models, is not reachable
@@ -153,7 +153,7 @@ module, so it is importable and testable before any network exists.
   53 operator names, the leaf tags and leaf payloads). `TokenStreamMask` lifts it to the vocabulary
   of section 1.6, emitting the canonical protocol `<RULE_START> s1 s2 ... sn <RULE_END> <EOS>` with
   exactly one space token between two symbols.
-- **Why the automaton is prefix-deterministic.** The arities live in `dataset/templates/operators.json`
+- **Why the automaton is prefix-deterministic.** The arities live in `datasets/multilingual/templates/operators.json`
   and every operator name has fixed arity, so after the symbol that follows `(` the number of
   remaining children is known and with it every closing bracket of that subtree. A leaf is `[`
   followed by a tag and payload tokens whose admissible lengths come from a *shape profile* learned
@@ -172,8 +172,8 @@ module, so it is importable and testable before any network exists.
   narrower than the vocabulary, or a batch of logits, is a hard error rather than a silent slice.
   `<RULE_END>` is offered *only* when the automaton is complete, and after it only `<EOS>`; the
   automaton never offers a second root.
-- **Measured behaviour** (`python dataset/tools/verify_masking.py --refine`, gate output in
-  `dataset/checkpoints/masking/masking_metrics.json`): mask alphabet 53 operators, 136 leaf tags,
+- **Measured behaviour** (`python datasets/multilingual/tools/verify_masking.py --refine`, gate output in
+  `datasets/multilingual/checkpoints/masking/masking_metrics.json`): mask alphabet 53 operators, 136 leaf tags,
   75 payload tokens, leaf length profile `{1: 135, 2: 1}`, 268 vocabulary tokens for the masked
   alphabet. `M1` held-out algebra: 1,350 of 1,350 accepted. `M2` negative controls: 16,350 mutated
   streams, 16,350 refused against an **independent** oracle that reuses `logic_map.is_well_bracketed`,
@@ -261,7 +261,7 @@ test suite asserts that an archive whose format name is not `lingologos-transfor
 ### 1.9 `training.py` - Masked Supervision, Schedules and Constrained Decoding
 
 `training.py` connects the corpus, the automaton and the network. It holds no hyperparameter policy of
-its own: the script `dataset/tools/train_model.py` owns the command line, this module owns the
+its own: the script `datasets/multilingual/tools/train_model.py` owns the command line, this module owns the
 arithmetic.
 
 - **Examples and labels.** `AlgebraExample(identifier, source_text, symbols, language, domain,
@@ -370,7 +370,10 @@ input artifact, the digest of each generated file, and the measurements of the f
 gates `H1` to `H5`. The generator writes LF line endings and UTF-8 without a byte order mark
 on every platform, so the recorded digest of a generated file equals what `sha256sum` prints
 for the file in the checkout, and gate 7 of the suite verifies exactly that over the raw
-bytes.
+bytes. `.gitattributes` pins `text eol=lf` for the whole `asic_chip/` tree, because a Windows
+checkout with `core.autocrlf` would otherwise rewrite the input artifacts, the generated RTL and
+the memory images to CRLF: the digests would stop matching the bytes on disk and the generated
+files would look stale on that host alone.
 
 **Status of this track, stated without inflation.** Python carries the generator, its five
 gates, and 23 tests that recompute the datapath, the field, the clause masks and the
@@ -443,7 +446,7 @@ separates executed from declared claim by claim.
   - `safetensors >= 0.4.0` - release format of the pure-model weights, section 1.8
   - `pytest >= 8.0.0`
 - Optional, used only when publishing: `huggingface_hub >= 0.23.0`, installed with
-  `pip install -e ".[publish]"`. `dataset/tools/publish_to_hub.py` imports it inside the upload step and
+  `pip install -e ".[publish]"`. `datasets/multilingual/tools/publish_to_hub.py` imports it inside the upload step and
   nowhere else, so building a release folder needs no Hub package and no network access.
 - The `asic_chip/` track of section 1.10 adds no dependency at all: its generator uses only the Python
   standard library and its gates run inside `pytest`. The tools that would take it further, Verilator,
@@ -495,11 +498,13 @@ pytest -v tests/
 ```
 The repository includes `.github/workflows/ci.yml` running pytest and the synthesis pipeline on GitHub Actions across Python versions 3.10, 3.11, and 3.12.
 
-### 2.4 The `dataset/` Companion Folder and its Release
+### 2.4 The `datasets/multilingual/` Companion Folder and its Release
 
-`dataset/` is a companion folder: it holds a synthetic multilingual corpus (Italian, English, French, Spanish, German) built from 50 sentence templates over five everyday domains, plus the small scripts that generate, validate, and learn from it. Nothing under `src/` reads it while the engine runs, and nothing in it changes the Dyck-2 engine: the bracket algebra it stores uses the same terminal alphabet as `src/neuro_symbolic`, which is why the trainer entry points reuse the existing parser, trainer, grammar and verifier modules unchanged.
+`datasets/multilingual/` is a companion folder: it holds a synthetic multilingual corpus (Italian, English, French, Spanish, German) built from 50 sentence templates over five everyday domains, plus the small scripts that generate, validate, and learn from it. Nothing under `src/` reads it while the engine runs, and nothing in it changes the Dyck-2 engine: the bracket algebra it stores uses the same terminal alphabet as `src/neuro_symbolic`, which is why the trainer entry points reuse the existing parser, trainer, grammar and verifier modules unchanged.
 
 Corpus and tools are versioned in this repository. The packaged files are published as GitHub Release assets under incrementing tags: the first release is `dataset-v1`, the next ones continue as `dataset-v2`, `dataset-v3` and so on (`https://github.com/tailot/LingoLOGOS/releases/latest` always points at the newest). A release carries `lingologos-dataset.zip` (data, chat pairs, corpus, configs, templates, tools), `grammar.json`, `grammar.yaml`, `DatasetGrammar.gf`, `grammar-metrics.json`, `tokenizer.json`, `tokenizer-metrics.json`, `masking-metrics.json` and `dataset-stats.json`. The files are free to download. `.github/workflows/dataset.yml` produces them in three stages: consistency check plus tokenizer and mask gates, grammar induction, and the release itself.
+
+The corpus folder sits at `datasets/multilingual/` and the orchestrator workspace keeps its own per-node folders (`datasets/<node_id>/`) beside it. The orchestrator resolves only the node ids declared in `config/topology.json`, so the corpus folder is never taken for a node. Path resolution is not positional either: every tool in `datasets/multilingual/tools/` starts from its own file and walks up until it finds the corpus marker `templates/operators.json` and the project root marker `pyproject.toml` with its `src` tree, so the corpus can be relocated without touching any source. `datasets/multilingual/tools/corpus_paths.py` implements that probe, exposes `repo_root`, `corpus_root` and `bootstrap`, and accepts the `LINGOLOGOS_REPO_ROOT` and `LINGOLOGOS_DATASET_ROOT` overrides, raising `CorpusPathsError` when an override does not carry the expected marker instead of reading another corpus silently. `tests/test_evaluation_tools.py` and `tests/test_hub_package.py` discover the tools under `datasets/*/tools` for the same reason.
 
 The learning and checking entry points of that folder, all thin wrappers over the modules documented
 above. The first four are model-free, the next three build and run the pure network of sections 1.8
@@ -507,14 +512,15 @@ and 1.9, and the last one publishes what they produced:
 
 | entry point | role |
 | --- | --- |
-| `dataset/tools/validate_dataset.py` | re-derives every bracket word, pattern and SMT text, and builds all 2,698 logical forms in Z3 |
-| `dataset/tools/train_grammar.py` | induces the PCFG over the corpus of the dataset with `DifferentiableCYKParser`, `GrammarTrainer`, `PCFGrammar` and `GrammarVerifier` |
-| `dataset/tools/train_tokenizer.py` | learns the byte-pair vocabulary of section 1.6 from the training split only, derives the protected alphabet from the operator registry, and runs gates `T1`-`T5` on all three splits |
-| `dataset/tools/verify_masking.py` | builds the automaton of section 1.7 from the registry plus the training split, and runs gates `M1`-`M5` against an independent oracle, including the negative controls and the token-level protocol check |
-| `dataset/tools/model_data.py` | shared loader: tokenizer, algebra mask, token mask, examples per split, length profile and hardware probe, so training and evaluation cannot drift apart |
-| `dataset/tools/train_model.py` | the training loop of section 1.9 on the real corpus: AdamW with one epoch of warmup and cosine decay, bf16 autocast, masked cross-entropy, per-epoch validation, constrained decoding slice, checkpoints under the git-ignored `dataset/checkpoints/model/` |
-| `dataset/tools/evaluate_model.py` | gates `E1`, `E2`, `E3`, `E5` on a held-out split: exact-tree accuracy with the per-language, per-domain and per-family breakdown, legality through the independent oracle, the registry plus Z3 audit of the trees the model produced, the invented-number audit, and the mask-ablation pass at identical weights |
-| `dataset/tools/publish_to_hub.py` | assembles the release folder `model.safetensors`, `config.json`, `tokenizer.json`, `mask_spec.json`, `metadata.json`, `evaluation_report.json` and the model card `README.md`; refuses a checkpoint whose gate report is not `PASS` unless `--allow-ungated` is given, checks that the reloaded safetensors weights are bit-identical and produce identical logits, records the sha256 of every file, and uploads only when `--upload` is passed and the token is in the environment (`--token-env`, default `HF_TOKEN`). Tested by `tests/test_hub_package.py`, 11 checks |
+| `datasets/multilingual/tools/validate_dataset.py` | re-derives every bracket word, pattern and SMT text, and builds all 2,698 logical forms in Z3 |
+| `datasets/multilingual/tools/train_grammar.py` | induces the PCFG over the corpus of the dataset with `DifferentiableCYKParser`, `GrammarTrainer`, `PCFGrammar` and `GrammarVerifier` |
+| `datasets/multilingual/tools/train_tokenizer.py` | learns the byte-pair vocabulary of section 1.6 from the training split only, derives the protected alphabet from the operator registry, and runs gates `T1`-`T5` on all three splits |
+| `datasets/multilingual/tools/verify_masking.py` | builds the automaton of section 1.7 from the registry plus the training split, and runs gates `M1`-`M5` against an independent oracle, including the negative controls and the token-level protocol check |
+| `datasets/multilingual/tools/model_data.py` | shared loader: tokenizer, algebra mask, token mask, examples per split, length profile and hardware probe, so training and evaluation cannot drift apart |
+| `datasets/multilingual/tools/train_model.py` | the training loop of section 1.9 on the real corpus: AdamW with one epoch of warmup and cosine decay, bf16 autocast, masked cross-entropy, per-epoch validation, constrained decoding slice, checkpoints under the git-ignored `datasets/multilingual/checkpoints/model/` |
+| `datasets/multilingual/tools/evaluate_model.py` | gates `E1`, `E2`, `E3`, `E5` on a held-out split: exact-tree accuracy with the per-language, per-domain and per-family breakdown, legality through the independent oracle, the registry plus Z3 audit of the trees the model produced, the invented-number audit, and the mask-ablation pass at identical weights |
+| `datasets/multilingual/tools/publish_to_hub.py` | assembles the release folder `model.safetensors`, `config.json`, `tokenizer.json`, `mask_spec.json`, `metadata.json`, `evaluation_report.json` and the model card `README.md`; refuses a checkpoint whose gate report is not `PASS` unless `--allow-ungated` is given, checks that the reloaded safetensors weights are bit-identical and produce identical logits, records the sha256 of every file, and uploads only when `--upload` is passed and the token is in the environment (`--token-env`, default `HF_TOKEN`). Tested by `tests/test_hub_package.py`, 11 checks |
+| `datasets/multilingual/tools/corpus_paths.py` | not an entry point but the helper the other nine import: finds the corpus root by the `templates/operators.json` marker and the project root by the `pyproject.toml` plus `src` markers, walking up from the file so the folder needs no fixed position, puts both roots and the tools folder on `sys.path`, and accepts the `LINGOLOGOS_DATASET_ROOT` and `LINGOLOGOS_REPO_ROOT` overrides |
 
 There is no chat fine-tuning stage and no third-party model in this repository: the assistant that
 answers in natural language is the pure model described in `doc/PURE_MODEL_ROADMAP.md`. Phases 1 to 4
@@ -522,9 +528,9 @@ of that roadmap are measured, phase 5 is the evaluation script above together wi
 packaging below, and the verbalization direction is specified but not trained. The trained weights are
 not in the repository either: they are published as `model.safetensors` in the Hugging Face model
 repository `tailot/lingologos-pure-1`, next to the tokenizer, the mask specification, the gate report
-and the model card assembled by `dataset/tools/publish_to_hub.py`. Sizing notes for consumer cards, the
+and the model card assembled by `datasets/multilingual/tools/publish_to_hub.py`. Sizing notes for consumer cards, the
 measured saturation of the vocabulary, the measured cost of a 20-epoch run and the full flag
-documentation are in `dataset/TRAINING.md` and in section 11 of `README.md`.
+documentation are in `datasets/multilingual/TRAINING.md` and in section 11 of `README.md`.
 
 ### 2.5 Building and Checking the `asic_chip/` Track
 
@@ -535,7 +541,7 @@ in `asic_chip/Makefile` and in `sim/sim_main.cpp` are relative to it.
 | --- | --- | --- | --- |
 | regenerate the generated RTL, both vector tables and the manifest | `python asic_chip/scripts/lingologos_compiler.py` | CPython, standard library only | EXECUTED, `FINAL VERDICT: PASS` |
 | prove the checked in files are the current ones | `python asic_chip/scripts/lingologos_compiler.py --check` | same | EXECUTED, adds the `RTL_matches_artifacts` gate |
-| run the gate suite required by `AGENTS.md` | `pytest -v tests/` | pytest | EXECUTED, 184 passed |
+| run the gate suite required by `AGENTS.md` | `pytest -v tests/` | pytest | EXECUTED, 200 passed |
 | lint and infer latches | `verilator --lint-only ... -DLL_DEBUG_PORTS --top-module lingologos_top` | Verilator 5.006 or later | EXECUTED in the image `verilator/verilator:latest`, Verilator 5.054, through `make -f asic_chip/Makefile lint`: exit 0, no warning left. NOT RUN on the host, where there is no Verilator and no `make` |
 | replay the 304 golden rows against Verilog | `verilator --cc --exe --build ... sim/sim_main.cpp` | Verilator and a C++ compiler | EXECUTED in that image, through `make -f asic_chip/Makefile sim-verilator`: 304 rows plus the core self test, 0 mismatches, `FINAL VERDICT: PASS`, 91 clock cycles for the self test, VCD written |
 | run the SystemVerilog testbench | `verilator --binary --timing ...` | Verilator | EXECUTED in that image, through `make -f asic_chip/Makefile sim-tb`: same checks, same verdict |
@@ -850,7 +856,7 @@ $$\tau_k = k, \quad k \in \{1, 2, \dots, \text{maxTurns}\}$$
 
 $$\mathcal{S}_{\text{volatile}}^{(k)} = \langle \tau_k, \dots \rangle$$
 
-- **Isolation Invariant**: Each node $v_i \in V$ runs as an isolated OS process via the CLI interface `lllayer`. No node implementation code is imported as an in-process module. Inter-process communication is performed strictly over standard I/O streams using JSON-encoded envelopes.
+- **Isolation Invariant**: Each node $v_i \in V$ runs as an isolated OS process via the CLI interface `lllayer`. No node implementation code is imported as an in-process module. Inter-process communication is performed strictly over standard I/O streams using JSON-encoded envelopes. The runner builds the environment of the node process explicitly and prepends the absolute folder that holds the `lingologos_orchestrator` package to `PYTHONPATH`: the node runs in its own working directory, where a relative entry inherited from the caller would not resolve, and a value the caller already had is kept behind that entry so an installed deployment is unaffected.
 
 ### 13.3 Formal SMT Verification with Z3
 

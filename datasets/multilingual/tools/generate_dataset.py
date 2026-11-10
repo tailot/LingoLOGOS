@@ -1,6 +1,6 @@
 """Generate the LingoLOGOS multilingual synthetic dataset.
 
-The script expands the template bank in dataset/templates into a deterministic
+The script expands the template bank in datasets/multilingual/templates into a deterministic
 corpus of everyday recurrence instructions in Italian, English, French, Spanish
 and German. Every logical form is emitted once per language inside the same
 parallel group, together with its bracket algebra (a word of Dyck-2 over the
@@ -16,7 +16,7 @@ Outputs, all under the dataset repository:
   configs/*.json                              Hugging Face data_files maps
   stats.json                                  corpus statistics and audits
 
-Run: python dataset/tools/generate_dataset.py --combos-per-template 40
+Run: python datasets/multilingual/tools/generate_dataset.py --combos-per-template 40
 """
 
 from __future__ import annotations
@@ -30,10 +30,12 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 HERE = Path(__file__).resolve().parent
-DATASET_ROOT = HERE.parent
-PROJECT_ROOT = DATASET_ROOT.parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
 
-sys.path.insert(0, str(HERE))
+from corpus_paths import bootstrap  # noqa: E402
+
+REPO_ROOT, DATASET_ROOT = bootstrap(HERE)
 
 import logic_map  # noqa: E402  (path bootstrap above)
 

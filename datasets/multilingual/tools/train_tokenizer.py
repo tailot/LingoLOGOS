@@ -12,10 +12,10 @@ vocabulary target. The report prints where it saturated instead of inflating the
 vocabulary with tokens that never occur.
 
 Usage:
-    python dataset/tools/train_tokenizer.py
-    python dataset/tools/train_tokenizer.py --vocab-size 6000 --min-frequency 2
-    python dataset/tools/train_tokenizer.py --list-only
-    python dataset/tools/train_tokenizer.py --all-splits
+    python datasets/multilingual/tools/train_tokenizer.py
+    python datasets/multilingual/tools/train_tokenizer.py --vocab-size 6000 --min-frequency 2
+    python datasets/multilingual/tools/train_tokenizer.py --list-only
+    python datasets/multilingual/tools/train_tokenizer.py --all-splits
 
 Merges are learned from the train split only, so the scores reported on the valid
 and test splits measure generalization of the vocabulary, not memorization.
@@ -30,11 +30,12 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Set, Tuple
 
 HERE = Path(__file__).resolve().parent
-DATASET_ROOT = HERE.parent
-REPO_ROOT = DATASET_ROOT.parent
-for entry in (str(REPO_ROOT), str(REPO_ROOT / "src")):
-    if entry not in sys.path:
-        sys.path.insert(0, entry)
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+from corpus_paths import bootstrap  # noqa: E402
+
+REPO_ROOT, DATASET_ROOT = bootstrap(HERE)
 
 from neuro_symbolic.tokenizer import (  # noqa: E402
     ALGEBRA_BRACKETS,

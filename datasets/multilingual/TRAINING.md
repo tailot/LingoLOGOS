@@ -1,11 +1,13 @@
 # Training guide
 
 Three independent runs are available in this folder. All of them read only this folder and
-write only inside `dataset/checkpoints/`; nothing in the LingoLOGOS source tree is modified,
+write only inside `datasets/multilingual/checkpoints/`; nothing in the LingoLOGOS source tree is modified,
 and **nothing here downloads a model, a vocabulary or a weight file from anywhere**. The
 assistant this corpus is meant to train is built from scratch; the parts that exist, the parts
 that are still missing and the measurements behind both are in `doc/PURE_MODEL_ROADMAP.md` at
-the repository root.
+the repository root. The commands below are written from the repository root, but every tool
+resolves the corpus and the engine by walking up from its own file in `tools/corpus_paths.py`, so
+they also work from any other directory and after a move of this folder.
 
 ## 0. Environment
 
@@ -25,7 +27,7 @@ induction, tokenizer learning and mask verification also work on the CPU.
 ## 1. Consistency check (always run this first)
 
 ```powershell
-python dataset/tools/validate_dataset.py
+python datasets/multilingual/tools/validate_dataset.py
 ```
 
 The script re-derives every bracket word, every pattern and every SMT text from the
@@ -41,7 +43,7 @@ representation the LingoLOGOS engine induces. This entry point reuses that engin
 the parent repository without changing it.
 
 ```powershell
-python dataset/tools/train_grammar.py --epochs 90 --synthetic 900
+python datasets/multilingual/tools/train_grammar.py --epochs 90 --synthetic 900
 ```
 
 What happens: the 29 structural words of `corpus/dyck2_train.txt` seed the corpus, and
@@ -49,7 +51,7 @@ synthetic Dyck-2 words (depth 5, length up to 28) give the probabilistic grammar
 statistical variety. Temperature anneals from 1.0 to 0.5, the grammar is extracted with
 pruning at 0.01 and exported.
 
-Artifacts in `dataset/checkpoints/grammar/`: `grammar_weights.pt`, `grammar.json`,
+Artifacts in `datasets/multilingual/checkpoints/grammar/`: `grammar_weights.pt`, `grammar.json`,
 `grammar.yaml`, `DatasetGrammar.gf`, `metrics.json`.
 
 Expected acceptance gates, all four true:
@@ -72,14 +74,14 @@ and the extracted grammar over-generates `(]`, which gate G4 then refuses.
 ## 3. Phase 1: learning the vocabulary of the pure model
 
 ```powershell
-python dataset/tools/train_tokenizer.py --vocab-size 6000
+python datasets/multilingual/tools/train_tokenizer.py --vocab-size 6000
 ```
 
 The script learns a byte-pair vocabulary from the `train` split of `sft/` only and measures
 itself on `train`, `valid` and `test`. It uses no pretrained tokenizer and no external
 corpus: the protected alphabet (the four brackets, the 53 operator names, the leaf tags) is
 derived from `templates/operators.json`, and merges are learned only inside ordinary words,
-never across a formal symbol. Artifacts: `dataset/checkpoints/tokenizer/tokenizer.json` and
+never across a formal symbol. Artifacts: `datasets/multilingual/checkpoints/tokenizer/tokenizer.json` and
 `metrics.json`.
 
 Measured on the shipped corpus:
@@ -115,7 +117,7 @@ destroys the held-out property) and `--lenient` to keep exit code 0 when a gate 
 ## 4. Phase 2: verifying the symbolic decoding mask
 
 ```powershell
-python dataset/tools/verify_masking.py --samples 300 --refine
+python datasets/multilingual/tools/verify_masking.py --samples 300 --refine
 ```
 
 The mask is a stack automaton over the *symbol* alphabet, built from the arities in
@@ -123,7 +125,7 @@ The mask is a stack automaton over the *symbol* alphabet, built from the arities
 exactly the legal bracket algebra and nothing else, so an illegal answer is not scored
 badly, it is unreachable. The tool checks it against an independent oracle that reuses
 `logic_map.is_well_bracketed`, the registry arities and an independent reader, never the
-mask itself. Artifact: `dataset/checkpoints/masking/masking_metrics.json`.
+mask itself. Artifact: `datasets/multilingual/checkpoints/masking/masking_metrics.json`.
 
 Measured:
 
@@ -168,7 +170,7 @@ determinism of the initialization, the He versus Xavier bound, save and load rou
 ## 6. Phase 4: training the pure model
 
 ```powershell
-python dataset/tools/train_model.py --epochs 20 --batch-size 64 --lr 5e-4 --warmup-steps 0 --amp auto
+python datasets/multilingual/tools/train_model.py --epochs 20 --batch-size 64 --lr 5e-4 --warmup-steps 0 --amp auto
 ```
 
 The loop trains on the 12,140 pairs of the training split only, with cross-entropy computed over the
@@ -194,14 +196,14 @@ Measured, 20 epochs, seed 17, bf16, 809 seconds on the RTX 5070 Ti:
 Only 19.66 percent of supervised positions are real choices: the automaton forces the other 80 percent
 to a single token (the space between symbols, the closing marker, `<EOS>`, the leaf payload
 continuation), so the free-position figure is measured over the hard fifth of the sequence. Artifacts
-land in `dataset/checkpoints/model/`: `model.pt`, `model_best.pt`, `model_config.json`, `history.json`
+land in `datasets/multilingual/checkpoints/model/`: `model.pt`, `model_best.pt`, `model_config.json`, `history.json`
 and `train_metrics.json`. Useful flags: `--limit`, `--device cpu`, `--amp off`, `--epochs`,
 `--warmup-steps`, `--eval-every`, `--generation-samples`, `--out-dir`, `--dry-run`.
 
 ## 7. Phase 5: held-out gates and the Z3 audit
 
 ```powershell
-python dataset/tools/evaluate_model.py --checkpoint dataset/checkpoints/model/model_best.pt --split test --min-exact-tree-accuracy 0.90
+python datasets/multilingual/tools/evaluate_model.py --checkpoint datasets/multilingual/checkpoints/model/model_best.pt --split test --min-exact-tree-accuracy 0.90
 ```
 
 The tool decodes the whole split under the mask, then reports four gates and writes a JSON report with
@@ -222,7 +224,7 @@ error concentrates in the `threshold` logic family (0.845 over 200 rows) and in 
 (0.941 to 0.956 across the five). Without the mask, at identical weights, no stream reaches the closing
 marker and the decoder repeats symbols until the step budget expires; its raw argmax is outside the
 admissible set at 83.6 percent of the teacher-forced positions. That is the measurement of what the
-symbolic constraint contributes. Reports: `dataset/checkpoints/evaluation/<checkpoint>-<split>.json`.
+symbolic constraint contributes. Reports: `datasets/multilingual/checkpoints/evaluation/<checkpoint>-<split>.json`.
 Flags: `--split`, `--limit`, `--batch-size`, `--sampling --temperature`, `--no-z3`, `--no-ablation`,
 `--no-refine`, `--min-exact-tree-accuracy`, `--max-invented-number-rate`, `--max-noncontingent-rate`,
 `--out`. Gate E4 (verbalization, tree back to sentence) is not trained and therefore not reported.
@@ -232,12 +234,12 @@ Flags: `--split`, `--limit`, `--batch-size`, `--sampling --temperature`, `--no-z
 The items are produced from the 50 templates and the multilingual lexicon:
 
 ```powershell
-python dataset/tools/generate_dataset.py --combos-per-template 60 --seed 13
-python dataset/tools/validate_dataset.py
+python datasets/multilingual/tools/generate_dataset.py --combos-per-template 60 --seed 13
+python datasets/multilingual/tools/validate_dataset.py
 ```
 
 Adding a sentence pattern means adding one entry to the relevant file in
-`dataset/templates/`; the validator then checks that the new patterns are covered by
+`datasets/multilingual/templates/`; the validator then checks that the new patterns are covered by
 the lexicon, that the bracket words stay balanced and that the SMT translation builds.
 After a regeneration, rerun the tokenizer and the mask gates: both learn their alphabet
 and their leaf shapes from the corpus, so a new domain has to relearn them.
@@ -245,7 +247,7 @@ and their leaf shapes from the corpus, so a new domain has to relearn them.
 ## 9. The pipeline in GitHub Actions
 
 The folder has its own pipeline, `.github/workflows/dataset.yml`, kept separate
-from the CI of the engine. It runs on every push that touches `dataset/**` and it
+from the CI of the engine. It runs on every push that touches `datasets/multilingual/**` and it
 can be started by hand from the Actions tab with the "Run workflow" button.
 
 Stages:
@@ -280,7 +282,7 @@ The weights are published on the Hugging Face Hub as `tailot/lingologos-pure-1`,
 one tool that reads what the training run left on disk:
 
 ```powershell
-python dataset/tools/publish_to_hub.py --checkpoint dataset/checkpoints/model/model_best.pt --report dataset/checkpoints/evaluation/model_best-test.json --out-dir dataset/checkpoints/hub --repo tailot/lingologos-pure-1
+python datasets/multilingual/tools/publish_to_hub.py --checkpoint datasets/multilingual/checkpoints/model/model_best.pt --report datasets/multilingual/checkpoints/evaluation/model_best-test.json --out-dir datasets/multilingual/checkpoints/hub --repo tailot/lingologos-pure-1
 ```
 
 That command only builds the folder. Adding `--upload`, after putting the access token in `$env:HF_TOKEN`,
@@ -301,13 +303,13 @@ The GitHub release route stays available for the raw checkpoint:
 ```powershell
 git tag model-v1
 git push origin model-v1
-gh release upload model-v1 dataset/checkpoints/model/model_best.pt --clobber
+gh release upload model-v1 datasets/multilingual/checkpoints/model/model_best.pt --clobber
 ```
 
 A verification job can then run the gates of section 7 before publishing, because
-`dataset/tools/evaluate_model.py` exits with code 1 when any gate fails and writes the per-gate `passed`
+`datasets/multilingual/tools/evaluate_model.py` exits with code 1 when any gate fails and writes the per-gate `passed`
 flags into its JSON report.
 
-Everything the pipeline runs fits on a CPU runner. `dataset/checkpoints/` stays out of
+Everything the pipeline runs fits on a CPU runner. `datasets/multilingual/checkpoints/` stays out of
 git, the access token is only ever read from the environment and never passed as an argument, and no stage
 of the training or evaluation pipeline contacts an external hub or downloads a model.

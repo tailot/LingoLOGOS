@@ -71,6 +71,22 @@ class NodeProcessRunner:
         # Default: attempt invocation directly
         return [executable]
 
+    def _child_environment(self) -> Dict[str, str]:
+        """Return an environment in which this package is importable by the node.
+
+        A node launched as ``python -m lingologos_orchestrator.lllayer`` finds the package only
+        when it is installed or when the folder holding it is on ``PYTHONPATH``. The node runs in
+        its own working directory, so a relative entry inherited from the caller would not resolve
+        there. The absolute folder is prepended and whatever the caller already had is kept behind
+        it, so an installed deployment is unaffected.
+        """
+        env = dict(os.environ)
+        package_parent = str(Path(__file__).resolve().parent.parent)
+        existing = env.get("PYTHONPATH", "")
+        entries = [package_parent] if not existing else [package_parent, existing]
+        env["PYTHONPATH"] = os.pathsep.join(entries)
+        return env
+
     def execute_turn(self, input_envelope: Envelope) -> Envelope:
         """Executes one turn on the isolated node process passing envelope via stdin."""
         node_dataset_dir = self.datasets_dir / self.node_id
@@ -97,6 +113,7 @@ class NodeProcessRunner:
                 capture_output=True,
                 timeout=self.timeout_seconds,
                 cwd=str(self.workspace_dir),
+                env=self._child_environment(),
             )
         except subprocess.TimeoutExpired as exc:
             raise OrchestratorError(

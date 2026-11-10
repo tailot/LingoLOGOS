@@ -263,7 +263,7 @@ which follows from the clauses and not from the netlist.
 
 **Scope note.** These clauses are a hardware test network written in the DSL documented in
 `asic_chip/artifacts/smt_constraints.json`. They are not the compiled form of the Z3
-assertions that `dataset/tools/logic_map.py` produces.
+assertions that `datasets/multilingual/tools/logic_map.py` produces.
 
 ### 4.4 Coprocessor instructions
 
@@ -451,4 +451,4 @@ Full details in `verification_report.md`.
 
 Generator digests of the three artifacts, recorded in
 `asic_chip/rtl/generated/MANIFEST.json`: `model_weights.json` `f7ff9dc8c2229eb3`,
-`gf_rules.json` `85c612cdcf543dd5`, `smt_constraints.json` `e36bbf1cff8c16fe`.
+`gf_rules.json` `85c612cdcf543dd5`, `smt_constraints.json` `7d7d5a25c4a2915c`.

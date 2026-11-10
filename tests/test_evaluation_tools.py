@@ -1,6 +1,6 @@
 """Unit tests for the gate arithmetic of the checkpoint evaluator.
 
-The evaluator lives in dataset/tools and its heavy parts need a trained checkpoint, so the
+The evaluator lives in datasets/multilingual/tools and its heavy parts need a trained checkpoint, so the
 tests here cover only the pure arithmetic that turns decoded rows into gate numbers: the
 accuracy bookkeeping, the legality tally, the numeric audit and the registry audit.
 """
@@ -13,7 +13,13 @@ from typing import Any, Dict, List, Sequence
 
 import pytest
 
-TOOLS = Path(__file__).resolve().parents[1] / "dataset" / "tools"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+TOOLS = next(
+    (p for p in sorted((REPO_ROOT / "datasets").glob("*/tools")) if (p / "evaluate_model.py").is_file()),
+    None,
+)
+if TOOLS is None:
+    raise LookupError("no corpus tools folder carrying evaluate_model.py under datasets")
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 

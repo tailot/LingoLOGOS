@@ -11,8 +11,8 @@ runtime_state/
 
 # Dataset companion folder: corpus and tools are versioned here,
 # training outputs stay local.
-dataset/checkpoints/
-dataset/_smoke/
+datasets/multilingual/checkpoints/
+datasets/multilingual/_smoke/
 .venv*/
 venv/
 

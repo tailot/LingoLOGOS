@@ -1,12 +1,12 @@
 # Pure Model Roadmap: the Assistant Trained From Scratch
 
 This document is the working specification of the **pure neuro-symbolic assistant** for the
-`dataset/` corpus: a model with no pretrained checkpoint, no downloaded vocabulary and no
+`datasets/multilingual/` corpus: a model with no pretrained checkpoint, no downloaded vocabulary and no
 third-party weights anywhere. It records what is already built and measured, what is still
 missing, and the corrections that measurement forced on the original specification.
 
 Related: `doc/TECHNICAL_DOCUMENTATION.md` sections 1.6 and 1.7 (tokenizer and mask design),
-`dataset/TRAINING.md` (commands, flags, gates), `README.md` section 11 (short version).
+`datasets/multilingual/TRAINING.md` (commands, flags, gates), `README.md` section 11 (short version).
 
 ---
 
@@ -20,9 +20,9 @@ Related: `doc/TECHNICAL_DOCUMENTATION.md` sections 1.6 and 1.7 (tokenizer and ma
    decoding mask of `src/neuro_symbolic/masking.py` (admissible logits only, everything else at
    $-\infty$), not by a penalty that the network may or may not respect.
 3. **Every answer is checkable.** A generated bracket tree is rebuilt into a logical form and
-   handed to Z3, the same way `dataset/tools/validate_dataset.py` checks the corpus.
+   handed to Z3, the same way `datasets/multilingual/tools/validate_dataset.py` checks the corpus.
 4. **One object, four views.** The model produces the bracket tree. The semantic pattern, the GF
-   abstraction and the SMT assertion are derived from it by `dataset/tools/logic_map.py`, so the
+   abstraction and the SMT assertion are derived from it by `datasets/multilingual/tools/logic_map.py`, so the
    model never emits JSON and cannot make the four views disagree. This is a change from the
    `sft/*.jsonl` rows, whose assistant turn is a JSON object with four string keys: that format
    belongs to the deleted external-model branch.
@@ -41,8 +41,8 @@ Related: `doc/TECHNICAL_DOCUMENTATION.md` sections 1.6 and 1.7 (tokenizer and ma
 Reproduce phases 1 and 2:
 
 ```powershell
-python dataset/tools/train_tokenizer.py --vocab-size 6000
-python dataset/tools/verify_masking.py --samples 300 --refine
+python datasets/multilingual/tools/train_tokenizer.py --vocab-size 6000
+python datasets/multilingual/tools/verify_masking.py --samples 300 --refine
 python -m pytest -v tests/
 ```
 
@@ -50,8 +50,8 @@ Reproduce the model track (809 seconds of training on the RTX 5070 Ti, about 7 m
 pass over the 675 test rows including the Z3 audit and the ablation):
 
 ```powershell
-python dataset/tools/train_model.py --epochs 20 --seed 17
-python dataset/tools/evaluate_model.py --checkpoint dataset/checkpoints/model/model_best.pt --split test --min-exact-tree-accuracy 0.90
+python datasets/multilingual/tools/train_model.py --epochs 20 --seed 17
+python datasets/multilingual/tools/evaluate_model.py --checkpoint datasets/multilingual/checkpoints/model/model_best.pt --split test --min-exact-tree-accuracy 0.90
 ```
 
 ## 3. Output protocol
@@ -150,7 +150,7 @@ much a penalty would add on top of a constraint that is already exact.
 Reported per epoch: masked cross-entropy, perplexity, free-position accuracy, exact target-sequence
 accuracy under teacher forcing, the same four on the validation split, the legality and exactness of
 greedy constrained decoding on a slice of the validation split, throughput and peak memory. The full
-history lands in `dataset/checkpoints/model/history.json` together with `train_metrics.json`, and the
+history lands in `datasets/multilingual/checkpoints/model/history.json` together with `train_metrics.json`, and the
 best-validation-loss weights are kept separately as `model_best.pt`.
 
 Ledger of the real run (seed 17, batch 64, bf16 autocast, 190 updates per epoch, 3,800 updates,
@@ -194,8 +194,8 @@ that is legal but semantically inconsistent with the sentence still fails there.
 ### Measured on the test split
 
 Both checkpoints, 675 held-out rows, greedy constrained decoding, seed 17, batch 32, Z3 pass enabled
-(`python dataset/tools/evaluate_model.py --checkpoint ... --split test --min-exact-tree-accuracy 0.90`);
-reports in `dataset/checkpoints/evaluation/model_best-test.json` and `model-test.json`, which also
+(`python datasets/multilingual/tools/evaluate_model.py --checkpoint ... --split test --min-exact-tree-accuracy 0.90`);
+reports in `datasets/multilingual/checkpoints/evaluation/model_best-test.json` and `model-test.json`, which also
 carry the per-gate `passed` flags and the overall `final_verdict`:
 
 | gate | `model_best.pt` (epoch 11, best validation loss) | `model.pt` (epoch 20, final) |
@@ -262,17 +262,17 @@ The previous dataset pipeline wrapped a third-party chat model. It is gone, not 
 flag, because a repository whose goal is a pure model must not carry a working path around an
 imported one:
 
-- `dataset/tools/train_sft.py` (LoRA fine-tuning of `Qwen/Qwen2.5-7B-Instruct`),
-  `dataset/tools/evaluate_sft.py`, `dataset/tools/ask_model.py`, `dataset/tools/publish_to_hub.py`
-  and `dataset/hf_publish/MODEL_CARD.md`.
+- `datasets/multilingual/tools/train_sft.py` (LoRA fine-tuning of `Qwen/Qwen2.5-7B-Instruct`),
+  `datasets/multilingual/tools/evaluate_sft.py`, `datasets/multilingual/tools/ask_model.py`, `datasets/multilingual/tools/publish_to_hub.py`
+  and `datasets/multilingual/hf_publish/MODEL_CARD.md`.
 - the `fine-tuning-smoke` job and the `sft_smoke` input of `.github/workflows/dataset.yml`.
 
 What survived from those scripts is model-free logic, reimplemented without any external
 dependency: the bracket reader and the structural checks now live in `src/neuro_symbolic/masking.py`
 (`parse_algebra`, `tokenize_algebra`, `stream_of_tree`, `skeleton_of_stream`) and
-`dataset/tools/logic_map.py`. The chat pairs in `dataset/sft/` and the seed file
-`dataset/sft/fewshot_seed.jsonl` stay: they are data, and the JSON renderings inside them are
-regenerated by `dataset/tools/generate_dataset.py` from the trees, which remain the single source of
+`datasets/multilingual/tools/logic_map.py`. The chat pairs in `datasets/multilingual/sft/` and the seed file
+`datasets/multilingual/sft/fewshot_seed.jsonl` stay: they are data, and the JSON renderings inside them are
+regenerated by `datasets/multilingual/tools/generate_dataset.py` from the trees, which remain the single source of
 truth.
 
 ## 10. Open risks, measured where measurement exists

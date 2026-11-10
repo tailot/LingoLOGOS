@@ -409,7 +409,7 @@ a network whose cone feeds itself.
 | Inverse of 0x02 is 0x8C | 0x8E, measured | 0x8C is wrong modulo 0x11D, and using it would make the close bracket a no-op |
 | 256 automaton states | 255 reachable, 1020 transitions written | 0x00 is unreachable from 0x01 with nonzero multipliers, and the default arm of the table sends any unexpected symbol to the initial state |
 | Mesh weights are the trained weights | fixed reference matrix from the specification text | `artifacts/grammar_weights.pt` is a trained torch tensor, not a quantized INT8 netlist constant; wiring it in is a separate, undone step |
-| The SMT evaluator evaluates the Z3 constraints | four hand written clauses in a documented DSL | `dataset/tools/logic_map.py` emits Boolean maps for a different interface; compiling those into this netlist is future work |
+| The SMT evaluator evaluates the Z3 constraints | four hand written clauses in a documented DSL | `datasets/multilingual/tools/logic_map.py` emits Boolean maps for a different interface; compiling those into this netlist is future work |
 | One cycle GF automaton | built as specified, but with a one byte state | a one byte state cannot count nesting, so the recognized language is the commutative image of Dyck-2, not Dyck-2 |
 | Program memory | 128 by 32 bit array initialized in the netlist | synthesis turns it into constant logic; production needs a compiled ROM macro, recorded under `NOTE_ROM` in `asic_chip/openlane/config.json` |
 | The core is a debug aid that reads the engines | the core also drives the engines: `LLGFS` advances the live automaton with the byte in `rs1`, and the mesh readback uses the live pad inputs | avoids a second state copy that could disagree with the pad-facing state; documented in section 6.3 |

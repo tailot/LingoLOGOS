@@ -4,11 +4,11 @@ Both ``train_model.py`` and ``evaluate_model.py`` need the same three objects, a
 have to be the same objects the mask gates were verified against, otherwise the training
 numbers and gate M5 would describe different machines. This module builds them once:
 
-* the learned tokenizer of ``dataset/checkpoints/tokenizer/tokenizer.json``, trained on the
+* the learned tokenizer of ``datasets/multilingual/checkpoints/tokenizer/tokenizer.json``, trained on the
   ``train`` split only, so the held-out score carries no vocabulary leakage;
 * the algebra automaton of the operator registry plus the leaf payloads of the ``train``
   split, optionally narrowed by the argument kinds observed in the same split;
-* the supervised pairs, taken from ``dataset/data/<language>/<split>-*.jsonl`` as the
+* the supervised pairs, taken from ``datasets/multilingual/data/<language>/<split>-*.jsonl`` as the
   ``phrase`` field and the space separated ``bracket_ast``.
 """
 
@@ -20,11 +20,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 HERE = Path(__file__).resolve().parent
-DATASET_ROOT = HERE.parent
-REPO_ROOT = DATASET_ROOT.parent
-for entry in (str(REPO_ROOT), str(REPO_ROOT / "src"), str(HERE)):
-    if entry not in sys.path:
-        sys.path.insert(0, entry)
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+from corpus_paths import bootstrap  # noqa: E402
+
+REPO_ROOT, DATASET_ROOT = bootstrap(HERE)
 
 from neuro_symbolic.masking import AlgebraMask, TokenStreamMask  # noqa: E402
 from neuro_symbolic.tokenizer import Tokenizer  # noqa: E402
@@ -47,7 +48,7 @@ def load_tokenizer(path: Optional[str] = None) -> Tokenizer:
 
 
 def arities_of_registry() -> Dict[str, int]:
-    """Operator name to arity, straight from ``dataset/templates/operators.json``."""
+    """Operator name to arity, straight from ``datasets/multilingual/templates/operators.json``."""
     return {name: int(spec["arity"]) for name, spec in load_registry().items()}
 
 

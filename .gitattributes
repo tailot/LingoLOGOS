@@ -1,0 +1,15 @@
+# Line ending policy.
+#
+# The ASIC tree is the sensitive case. asic_chip/rtl/generated/MANIFEST.json stores
+# sha256 digests taken over the bytes of the input artifacts, the generated RTL and the
+# memory images, and the ASIC test suite recomputes those digests from the working tree
+# while also rejecting CRLF in that tree. With core.autocrlf enabled, a Windows checkout
+# rewrites those files to CRLF, so the hashes stop matching and the generated files look
+# stale even when the repository content is correct. Pinning LF for that tree keeps the
+# same hashes on every host.
+asic_chip/** text eol=lf
+
+# Keep the attribute files and the CI definitions on LF too, so their bytes do not move
+# between hosts.
+.gitattributes text eol=lf
+.github/** text eol=lf

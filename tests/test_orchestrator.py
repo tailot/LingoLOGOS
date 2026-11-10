@@ -447,7 +447,14 @@ def test_cli_execution_from_subprocess():
         "--datasets", "datasets",
         "--json",
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    # The module entry point needs the package importable, and the interpreter of the
+    # subprocess does not inherit the source folder of this checkout, so the absolute
+    # path of src is put in PYTHONPATH of the child process.
+    env = dict(os.environ)
+    src_dir = str(Path(__file__).resolve().parents[1] / "src")
+    inherited = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = src_dir if not inherited else src_dir + os.pathsep + inherited
+    proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
     assert proc.returncode == 0, f"CLI error: {proc.stderr}"
     data = json.loads(proc.stdout)
     assert data["sessionId"] == "lingologos-multiagent-01"

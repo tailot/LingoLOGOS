@@ -5,7 +5,7 @@ third-party vocabulary, so the tokenizer has to be learned from the corpus too.
 Two properties are what make the symbolic layer work on top of it:
 
 * the structural symbols of the bracket algebra stay atomic. ``( ) [ ]``, every
-  operator name of ``dataset/templates/operators.json`` and every canonical leaf
+  operator name of ``datasets/multilingual/templates/operators.json`` and every canonical leaf
   identifier are one single token, and they never take part in a merge, so the
   constrained decoder in :mod:`neuro_symbolic.masking` can reason about them one
   token at a time;
@@ -18,7 +18,7 @@ Size note. The corpus is closed and small: about 1.9k distinct word forms, 17
 accented letters and 1.96M tokens, and every word form occurs at least twice.
 The merge process therefore saturates far below the 8k-32k vocabulary a web
 scale model needs. :meth:`Tokenizer.train` records where it stopped, and
-``dataset/tools/train_tokenizer.py`` reports the saturation point instead of
+``datasets/multilingual/tools/train_tokenizer.py`` reports the saturation point instead of
 padding the vocabulary with tokens that never occur.
 """
 

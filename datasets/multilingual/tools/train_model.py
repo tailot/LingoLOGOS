@@ -9,10 +9,10 @@ gradient norm clipped at 1.0).
 
 Usage
 -----
-    python dataset/tools/train_model.py --dry-run
-    python dataset/tools/train_model.py --epochs 20 --batch-size 64 --amp
+    python datasets/multilingual/tools/train_model.py --dry-run
+    python datasets/multilingual/tools/train_model.py --epochs 20 --batch-size 64 --amp
 
-Outputs land in ``dataset/checkpoints/model``: ``model.pt`` with the last weights,
+Outputs land in ``datasets/multilingual/checkpoints/model``: ``model.pt`` with the last weights,
 ``model_best.pt`` with the lowest validation loss, ``model_config.json``, ``history.json``
 and ``train_metrics.json``. The held-out test split is never read here; the evaluation tool
 owns it.
@@ -29,11 +29,12 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 HERE = Path(__file__).resolve().parent
-DATASET_ROOT = HERE.parent
-REPO_ROOT = DATASET_ROOT.parent
-for entry in (str(REPO_ROOT), str(REPO_ROOT / "src"), str(HERE)):
-    if entry not in sys.path:
-        sys.path.insert(0, entry)
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+from corpus_paths import bootstrap  # noqa: E402
+
+REPO_ROOT, DATASET_ROOT = bootstrap(HERE)
 
 import torch  # noqa: E402
 

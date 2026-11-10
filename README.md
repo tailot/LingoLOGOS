@@ -245,7 +245,8 @@ documentation cannot drift away from the code). Its contract:
 ├── datasets/
 │   ├── agente_alfa/               # Datasets, SMT ontology, and GF grammar for node
 │   ├── agente_beta/
-│   └── arbitro_logico/
+│   ├── arbitro_logico/
+│   └── multilingual/              # Multilingual corpus, templates, and the tools that learn from it
 ├── src/
 │   ├── lingologos_orchestrator/   # Distributed multi-instance orchestrator (RFC LingoLOGOS-MULTI-ORCH-v1)
 │   │   ├── cli.py                 # CLI entrypoint for lingologos-orchestrator
@@ -263,13 +264,22 @@ documentation cannot drift away from the code). Its contract:
 └── README.md                      # System documentation
 ```
 
-The companion `dataset/` folder (corpus, chat pairs, Dyck-2 corpus, templates, and the tools that
+The companion `datasets/multilingual/` folder (corpus, chat pairs, Dyck-2 corpus, templates, and the tools that
 validate it, learn its vocabulary, check its decoding mask, train the pure network on it and package the
-result for publication) is documented in section 11 and in `dataset/README.md`. The learned tokenizer,
-the model checkpoints and the evaluation reports live under `dataset/checkpoints/`, which is git-ignored:
+result for publication) is documented in section 11 and in `datasets/multilingual/README.md`. The learned tokenizer,
+the model checkpoints and the evaluation reports live under `datasets/multilingual/checkpoints/`, which is git-ignored:
 the repository carries the code and the data that rebuild them, not the weights. The trained weights of
 the pure model are published as `model.safetensors` on the Hugging Face Hub, and section 11 gives the
 command that builds and uploads that release.
+
+Every tool inside that folder starts from its own file, so the corpus has no fixed position
+in the repository: `datasets/multilingual/tools/corpus_paths.py` walks up until it finds the
+corpus marker `templates/operators.json` and the project root marker `pyproject.toml` with
+its `src` tree, and the `LINGOLOGOS_DATASET_ROOT` and `LINGOLOGOS_REPO_ROOT` variables
+override the two probes. The corpus sits at `datasets/multilingual/`, a sibling of the
+per-node folders the orchestrator uses (`datasets/<node_id>/`), and the orchestrator builds
+paths only for the node ids declared in `config/topology.json`, so it never reads the corpus
+folder.
 
 ---
 
@@ -391,14 +401,14 @@ two complete place and routes in WSL Ubuntu, and Icarus Verilog has never run he
 
 ### Continuous Integration (GitHub Actions)
 Tests and formal verification run automatically on push or pull requests via `.github/workflows/ci.yml` across Python **3.10**, **3.11**, and **3.12**.
-The companion pipeline `.github/workflows/dataset.yml` runs on changes under `dataset/`: corpus consistency, the tokenizer gates `T1`-`T5`, the mask gates `M1`-`M5`, grammar induction, and the GitHub Release that carries the artifacts.
+The companion pipeline `.github/workflows/dataset.yml` runs on changes under `datasets/multilingual/`: corpus consistency, the tokenizer gates `T1`-`T5`, the mask gates `M1`-`M5`, grammar induction, and the GitHub Release that carries the artifacts.
 The ASIC gates run inside `pytest -v tests/` and therefore in CI, because they are pure Python; the Verilator and OpenLane steps are not in CI, and `asic_chip/doc/verification_report.md` states that as a limit on what is verified.
 
 ---
 
 ## 11. Synthetic Multilingual Dataset and the Pure Model Track
 
-The folder `dataset/` is independent from the system described above: it holds a corpus
+The folder `datasets/multilingual/` is independent from the system described above: it holds a corpus
 plus the scripts that build and check it, and nothing in `src/` reads it while the
 assistant runs. It is the training ground of a **hobby assistant built for fun on synthetic
 everyday routines**, not a component of the product. The sentences were generated from 50
@@ -438,9 +448,14 @@ grammar induction) and then publishes the files. Neural training, which is phase
 to your own machine.
 
 ```powershell
-python dataset/tools/validate_dataset.py            # consistency plus Z3 on every form
-python dataset/tools/train_grammar.py --epochs 90 --synthetic 900
+python datasets/multilingual/tools/validate_dataset.py            # consistency plus Z3 on every form
+python datasets/multilingual/tools/train_grammar.py --epochs 90 --synthetic 900
 ```
+
+The commands work from any working directory, and the corpus does not have to live at that
+path: the tools locate it by walking up from their own file, so a moved or renamed corpus
+needs no change in the sources. `--dataset-root` on each tool overrides the corpus location
+explicitly.
 
 ### Phase 1 -- a vocabulary learned from this corpus (implemented and gated)
 
@@ -450,11 +465,11 @@ join, while ordinary words are learned from the text. Nothing is downloaded; `lo
 vocabulary whose format id is not `lingologos-bpe-1`.
 
 ```powershell
-python dataset/tools/train_tokenizer.py --vocab-size 6000
+python datasets/multilingual/tools/train_tokenizer.py --vocab-size 6000
 ```
 
 The tool trains on the training split only and measures train, valid and test, writing
-`dataset/checkpoints/tokenizer/tokenizer.json` and `metrics.json`:
+`datasets/multilingual/checkpoints/tokenizer/tokenizer.json` and `metrics.json`:
 
 | measured on the shipped corpus | value |
 | :--- | :--- |
@@ -473,18 +488,18 @@ generalizes to held-out data, `T5` algebra round trip: all pass.
 
 `src/neuro_symbolic/masking.py` builds a stack automaton over the *symbol* alphabet that admits
 exactly the legal bracket algebra: the root must be a round node, brackets must be matched, a round
-node must hold exactly as many children as the arity in `dataset/templates/operators.json`, and a
+node must hold exactly as many children as the arity in `datasets/multilingual/templates/operators.json`, and a
 leaf must match the payload shape observed in the corpus. Because an operator name reveals its
 arity immediately, admissibility is decidable from the prefix alone, so the mask is a function of
 the prefix and can be applied to the logits at every decoding step.
 
 ```powershell
-python dataset/tools/verify_masking.py --samples 300 --refine
+python datasets/multilingual/tools/verify_masking.py --samples 300 --refine
 ```
 
 The tool checks the automaton against an **independent oracle** (it reuses `logic_map.is_well_bracketed`,
 the registry arities and an independent reader, never the mask itself), writing
-`dataset/checkpoints/masking/masking_metrics.json`:
+`datasets/multilingual/checkpoints/masking/masking_metrics.json`:
 
 | gate | measured |
 | :--- | :--- |
@@ -510,7 +525,7 @@ The target sequence is the algebra itself, framed by the special tokens:
 
 one symbol per token, single spaces between symbols. Each dataset meaning is stored in four
 renderings, and the other three (semantic pattern, GF abstraction, SMT assertion) are derived
-deterministically from that tree by `dataset/tools/logic_map.py`, so the model never has to
+deterministically from that tree by `datasets/multilingual/tools/logic_map.py`, so the model never has to
 generate JSON or SMT text: one object to learn, three guaranteed views of it.
 
 ### Phases 3 to 5 -- built and measured
@@ -519,11 +534,11 @@ The network is `src/neuro_symbolic/model.py`: 6 encoder plus 6 decoder blocks, 8
 `d_ff` 2048, dropout 0.1, learned absolute positions, 48,253,952 parameters, initialization exactly as
 specified (LayerNorm 1/0, embeddings N(0, 0.02), Kaiming on the ReLU side of the feed-forward blocks,
 Xavier elsewhere, uniform biases). The training loop is `src/neuro_symbolic/training.py` driven by
-`dataset/tools/train_model.py`, and the held-out evaluation is `dataset/tools/evaluate_model.py`.
+`datasets/multilingual/tools/train_model.py`, and the held-out evaluation is `datasets/multilingual/tools/evaluate_model.py`.
 
 ```powershell
-python dataset/tools/train_model.py --epochs 20 --batch-size 64 --lr 5e-4 --warmup-steps 0 --amp auto
-python dataset/tools/evaluate_model.py --checkpoint dataset/checkpoints/model/model_best.pt --split test --min-exact-tree-accuracy 0.90
+python datasets/multilingual/tools/train_model.py --epochs 20 --batch-size 64 --lr 5e-4 --warmup-steps 0 --amp auto
+python datasets/multilingual/tools/evaluate_model.py --checkpoint datasets/multilingual/checkpoints/model/model_best.pt --split test --min-exact-tree-accuracy 0.90
 ```
 
 Ledger of the real 20-epoch run on the 12,140 training pairs (seed 17, batch 64, bf16, 3,800 updates,
@@ -549,7 +564,7 @@ Evaluation of the best checkpoint on the 675 rows of the **test** split, gates p
 The table reports the checkpoint with the best validation loss (epoch 11). The final epoch-20 weights do
 better on the gate metric itself, **0.9511 exact tree (642 of 675)**, because validation loss averages
 the 80 percent of positions the automaton forces and is a weak proxy for exact-tree accuracy; both
-reports and both sets of numbers are in `dataset/checkpoints/evaluation/` and in section 7 of
+reports and both sets of numbers are in `datasets/multilingual/checkpoints/evaluation/` and in section 7 of
 `doc/PURE_MODEL_ROADMAP.md`.
 
 `E5` is the sharpest number in the table: with the mask switched off at inference time, at identical
@@ -578,7 +593,7 @@ specified but not trained.
 ### Attaching dataset artifacts to a GitHub release
 
 ```powershell
-Compress-Archive -Path dataset\checkpoints\tokenizer\* -DestinationPath dist\tokenizer.zip
+Compress-Archive -Path datasets\multilingual\checkpoints\tokenizer\* -DestinationPath dist\tokenizer.zip
 gh release upload dataset-v1 dist\tokenizer.zip --clobber
 ```
 
@@ -592,13 +607,13 @@ output projection is stored **once**: 260 tensor entries for the 261 names `stat
 `load_model_safetensors` rebuilds the architecture from that header and loads with `strict=True`, which
 re-establishes the tie.
 
-`dataset/tools/publish_to_hub.py` assembles the release folder and, with `--upload`, pushes it to the
+`datasets/multilingual/tools/publish_to_hub.py` assembles the release folder and, with `--upload`, pushes it to the
 Hugging Face Hub:
 
 ```powershell
-python dataset/tools/publish_to_hub.py --checkpoint dataset/checkpoints/model/model_best.pt --report dataset/checkpoints/evaluation/model_best-test.json --out-dir dataset/checkpoints/hub --repo tailot/lingologos-pure-1
+python datasets/multilingual/tools/publish_to_hub.py --checkpoint datasets/multilingual/checkpoints/model/model_best.pt --report datasets/multilingual/checkpoints/evaluation/model_best-test.json --out-dir datasets/multilingual/checkpoints/hub --repo tailot/lingologos-pure-1
 $env:HF_TOKEN = "..."    # the token is read from the environment, never passed as an argument
-python dataset/tools/publish_to_hub.py --checkpoint dataset/checkpoints/model/model_best.pt --report dataset/checkpoints/evaluation/model_best-test.json --out-dir dataset/checkpoints/hub --repo tailot/lingologos-pure-1 --upload
+python datasets/multilingual/tools/publish_to_hub.py --checkpoint datasets/multilingual/checkpoints/model/model_best.pt --report datasets/multilingual/checkpoints/evaluation/model_best-test.json --out-dir datasets/multilingual/checkpoints/hub --repo tailot/lingologos-pure-1 --upload
 ```
 
 The folder holds seven files: `model.safetensors`, `config.json`, `tokenizer.json`, `mask_spec.json`,
@@ -610,7 +625,7 @@ make the symbolic constraint part of the release. The tool refuses a checkpoint 
 compared, largest logit difference 0.0 on a fixed probe batch) before anything leaves the machine, and
 records the sha256 of every artifact in `metadata.json`.
 
-The model card repeats the gate table as printed by `dataset/tools/evaluate_model.py`, the breakdown by
+The model card repeats the gate table as printed by `datasets/multilingual/tools/evaluate_model.py`, the breakdown by
 language, domain and logic family, the `E5` mask ablation, and what the model does not do: no
 verbalization direction back to a sentence, no chat ability, and a license line because the source
 repository declares none.
@@ -623,11 +638,11 @@ the 2 GiB per-file limit of a release asset, while a workflow artifact of that s
 ```powershell
 git tag model-v1
 git push origin model-v1
-gh release upload model-v1 dataset\checkpoints\model\model_best.pt --clobber
+gh release upload model-v1 datasets\multilingual\checkpoints\model\model_best.pt --clobber
 ```
 
 Training itself stays off hosted runners: they have no GPU, the 20-epoch run is an 809-second CUDA job
-here, and a verification job only needs to run `dataset/tools/evaluate_model.py`, which exits with code 1
+here, and a verification job only needs to run `datasets/multilingual/tools/evaluate_model.py`, which exits with code 1
 when any gate fails and writes the per-gate `passed` flags into its report.
 
 ---

@@ -1,6 +1,6 @@
 name: Dataset Pipeline
 
-# The dataset folder is data and tools, independent from the engine in src/.
+# The corpus folder datasets/multilingual is data and tools, independent from the engine in src/.
 # This pipeline checks the corpus, learns the tokenizer and the symbolic decoding
 # mask from scratch, induces the grammar behind the bracket algebra and publishes
 # the packaged files as a GitHub Release. No external hub and no third-party model
@@ -19,7 +19,7 @@ on:
         default: ""
   push:
     paths:
-      - "dataset/**"
+      - "datasets/multilingual/**"
       - ".github/workflows/dataset.yml"
     tags:
       - "dataset-v*"
@@ -55,31 +55,31 @@ jobs:
 
       - name: Validate the dataset end to end
         run: |
-          python dataset/tools/validate_dataset.py
+          python datasets/multilingual/tools/validate_dataset.py
 
       - name: Learn the tokenizer from the corpus
         run: |
-          python dataset/tools/train_tokenizer.py
+          python datasets/multilingual/tools/train_tokenizer.py
 
       - name: Verify the symbolic decoding mask
         run: |
-          python dataset/tools/verify_masking.py --samples 200
+          python datasets/multilingual/tools/verify_masking.py --samples 200
 
       - name: Upload the tokenizer and mask artifacts
         uses: actions/upload-artifact@v4
         with:
           name: tokenizer-artifacts
           path: |
-            dataset/checkpoints/tokenizer/tokenizer.json
-            dataset/checkpoints/tokenizer/metrics.json
-            dataset/checkpoints/masking/masking_metrics.json
+            datasets/multilingual/checkpoints/tokenizer/tokenizer.json
+            datasets/multilingual/checkpoints/tokenizer/metrics.json
+            datasets/multilingual/checkpoints/masking/masking_metrics.json
           if-no-files-found: error
 
       - name: Upload the statistics file
         uses: actions/upload-artifact@v4
         with:
           name: dataset-stats
-          path: dataset/stats.json
+          path: datasets/multilingual/stats.json
 
   grammar:
     name: Induce the grammar of the bracket algebra
@@ -102,18 +102,18 @@ jobs:
 
       - name: Train the probabilistic grammar
         run: |
-          python dataset/tools/train_grammar.py --epochs 90 --synthetic 900
+          python datasets/multilingual/tools/train_grammar.py --epochs 90 --synthetic 900
 
       - name: Upload grammar artifacts
         uses: actions/upload-artifact@v4
         with:
           name: grammar-artifacts
           path: |
-            dataset/checkpoints/grammar/grammar.json
-            dataset/checkpoints/grammar/grammar.yaml
-            dataset/checkpoints/grammar/DatasetGrammar.gf
-            dataset/checkpoints/grammar/grammar_weights.pt
-            dataset/checkpoints/grammar/metrics.json
+            datasets/multilingual/checkpoints/grammar/grammar.json
+            datasets/multilingual/checkpoints/grammar/grammar.yaml
+            datasets/multilingual/checkpoints/grammar/DatasetGrammar.gf
+            datasets/multilingual/checkpoints/grammar/grammar_weights.pt
+            datasets/multilingual/checkpoints/grammar/metrics.json
           if-no-files-found: error
 
   release:
@@ -148,10 +148,10 @@ jobs:
       - name: Package the dataset and the trained grammar
         run: |
           mkdir -p dist
-          cp dataset/stats.json dist/dataset-stats.json
+          cp datasets/multilingual/stats.json dist/dataset-stats.json
           zip -q -r dist/lingologos-dataset.zip \
-            dataset/README.md dataset/TRAINING.md dataset/stats.json \
-            dataset/data dataset/sft dataset/corpus dataset/configs dataset/templates dataset/tools
+            datasets/multilingual/README.md datasets/multilingual/TRAINING.md datasets/multilingual/stats.json \
+            datasets/multilingual/data datasets/multilingual/sft datasets/multilingual/corpus datasets/multilingual/configs datasets/multilingual/templates datasets/multilingual/tools
           cp staged/grammar/grammar.json dist/grammar.json
           cp staged/grammar/grammar.yaml dist/grammar.yaml
           cp staged/grammar/DatasetGrammar.gf dist/DatasetGrammar.gf
@@ -161,7 +161,7 @@ jobs:
           cp staged/tokenizer/masking/masking_metrics.json dist/masking-metrics.json
           python - <<'PY'
           import json
-          stats = json.load(open("dataset/stats.json"))
+          stats = json.load(open("datasets/multilingual/stats.json"))
           print("items: " + str(stats["items_total"]))
           print("logical forms: " + str(stats["logical_forms"]))
           PY
@@ -181,7 +181,7 @@ jobs:
             git tag "$TAG"
             git push origin "$TAG"
           fi
-          ITEMS=$(python -c "import json;print(json.load(open('dataset/stats.json'))['items_total'])")
+          ITEMS=$(python -c "import json;print(json.load(open('datasets/multilingual/stats.json'))['items_total'])")
           NOTES="Synthetic multilingual recurrence corpus for LingoLOGOS: ${ITEMS} items in five languages, with the grammar induced from its bracket algebra and the tokenizer plus symbolic decoding mask learned from the corpus itself. Files: lingologos-dataset.zip (full corpus), grammar.json / grammar.yaml / DatasetGrammar.gf (induced grammar), grammar-metrics.json (acceptance gates), tokenizer.json / tokenizer-metrics.json (byte-pair vocabulary), masking-metrics.json (symbolic decoding gates)."
           gh release create "$TAG" dist/*.zip dist/grammar.json dist/grammar.yaml dist/DatasetGrammar.gf dist/grammar-metrics.json dist/tokenizer.json dist/tokenizer-metrics.json dist/masking-metrics.json dist/dataset-stats.json \
             --title "Dataset ${TAG}" \

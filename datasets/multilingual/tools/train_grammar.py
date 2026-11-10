@@ -4,7 +4,7 @@ The dataset stores every instruction as a balanced word over the four Dyck-2
 terminals, so the generator corpus of the LingoLOGOS engine can be trained on
 the structures this dataset really means. The script reuses the engine in the
 parent repository untouched (it only adds it to sys.path) and writes its own
-artifacts under dataset/checkpoints, never into the project artifacts folder.
+artifacts under datasets/multilingual/checkpoints, never into the project artifacts folder.
 
 By default the corpus mixes the dataset words with synthetic Dyck-2 words: the
 dataset supplies 29 structural words, and synthetic sampling gives the PCFG
@@ -12,9 +12,9 @@ enough statistical variety to be identifiable. The coverage gate G2 is always
 measured on the dataset words alone.
 
 Usage:
-    python dataset/tools/train_grammar.py
-    python dataset/tools/train_grammar.py --epochs 120 --synthetic 900
-    python dataset/tools/train_grammar.py --init random --num-nt 6
+    python datasets/multilingual/tools/train_grammar.py
+    python datasets/multilingual/tools/train_grammar.py --epochs 120 --synthetic 900
+    python datasets/multilingual/tools/train_grammar.py --init random --num-nt 6
 """
 
 from __future__ import annotations
@@ -27,11 +27,12 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 HERE = Path(__file__).resolve().parent
-DATASET_ROOT = HERE.parent
-REPO_ROOT = DATASET_ROOT.parent
-for entry in (str(REPO_ROOT), str(REPO_ROOT / "src")):
-    if entry not in sys.path:
-        sys.path.insert(0, entry)
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+from corpus_paths import bootstrap  # noqa: E402
+
+REPO_ROOT, DATASET_ROOT = bootstrap(HERE)
 
 import torch  # noqa: E402
 

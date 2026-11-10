@@ -7,8 +7,8 @@ run first, then the formal pass builds real Z3 assertions and asks whether
 each logical form is contingent: satisfiable, and still satisfiable negated.
 
 Usage:
-    python dataset/tools/validate_dataset.py
-    python dataset/tools/validate_dataset.py --no-z3 --max-z3-forms 400
+    python datasets/multilingual/tools/validate_dataset.py
+    python datasets/multilingual/tools/validate_dataset.py --no-z3 --max-z3-forms 400
 """
 
 from __future__ import annotations
@@ -22,8 +22,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 HERE = Path(__file__).resolve().parent
-DATASET_ROOT = HERE.parent
-sys.path.insert(0, str(HERE))
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+from corpus_paths import bootstrap  # noqa: E402
+
+REPO_ROOT, DATASET_ROOT = bootstrap(HERE)
 
 import logic_map  # noqa: E402  (bootstrap above)
 
