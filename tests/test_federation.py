@@ -32,6 +32,7 @@ from lingologos_orchestrator.schema import (
     SchemaValidationError,
 )
 from lingologos_orchestrator.resolver import resolve_node_transport, NodeResolver
+from lingologos_orchestrator.node_runner import HttpNodeRunner
 from lingologos_orchestrator.event_bus import EventBus, DynamicNodeSpawner
 from lingologos_orchestrator.solver_pool import SMTSolverPool, SolverTask
 from lingologos_orchestrator.consolidation import ModelConsolidator
@@ -69,7 +70,7 @@ def test_resolve_node_transport_local(tmp_path):
 
 def test_resolve_node_transport_http():
     """HTTP transport resolves to endpoint URL string."""
-    url = "https://api.lingologos-inference.net/v1/evaluate"
+    url = "http://127.0.0.1:8080/v1/evaluate"
     conf = {"transport": "http", "node_id": "test_http", "endpoint_url": url}
     res = resolve_node_transport(conf)
     assert res == url
@@ -81,7 +82,7 @@ def test_resolve_node_transport_git(mock_subproc, tmp_path):
     cache_dir = tmp_path / "cache" / "test_repo"
     conf = {
         "transport": "git",
-        "remote_source": "https://example.com/repo.git",
+        "remote_source": "http://127.0.0.1:9418/repo.git",
         "branch": "main",
         "local_cache_path": str(cache_dir),
     }
@@ -90,7 +91,7 @@ def test_resolve_node_transport_git(mock_subproc, tmp_path):
     res = resolve_node_transport(conf)
     assert res == cache_dir
     mock_subproc.assert_called_with(
-        ["git", "clone", "--branch", "main", "--depth", "1", "https://example.com/repo.git", str(cache_dir)],
+        ["git", "clone", "--branch", "main", "--depth", "1", "http://127.0.0.1:9418/repo.git", str(cache_dir)],
         check=True,
         capture_output=True,
         text=True,
@@ -238,7 +239,7 @@ def test_federated_orchestrator_initialization(tmp_path):
                 "node_id": "node_http",
                 "role": "Remote Validator",
                 "transport": "http",
-                "endpoint_url": "https://fake.lingologos.local/eval",
+                "endpoint_url": "http://127.0.0.1:8080/eval",
                 "outbound_channels": [],
             }
         ],
@@ -254,3 +255,43 @@ def test_federated_orchestrator_initialization(tmp_path):
     )
     assert orch.federated_config is not None
     assert orch.validate_static() is True
+
+
+@patch("httpx.Client.post")
+def test_http_node_runner_local(mock_post):
+    """HttpNodeRunner interacts strictly with local endpoint."""
+    fake_response = MagicMock()
+    fake_response.json.return_value = {
+        "sender": "node_http",
+        "recipient": "node_core",
+        "turn": 1,
+        "volatileState": {"internalTimeTick": 1},
+        "payload": {
+            "naturalLanguage": "Local HTTP response",
+            "abstractSyntaxTree": "ResponseAST",
+            "smtConstraints": {"declarations": [], "assertions": ["(assert true)"], "z3Status": "sat"},
+        },
+    }
+    mock_post.return_value = fake_response
+
+    runner = HttpNodeRunner(
+        node_id="node_http",
+        endpoint_url="http://127.0.0.1:8080/evaluate",
+        role="validator",
+    )
+    in_env = Envelope(
+        sender="node_core",
+        recipient="node_http",
+        turn=1,
+        volatileState=VolatileState(internalTimeTick=1),
+        payload=Payload(
+            naturalLanguage="Local query",
+            abstractSyntaxTree="QueryAST",
+            smtConstraints=SMTConstraints(),
+        ),
+    )
+    out_env = runner.execute_turn(in_env)
+    assert out_env.sender == "node_http"
+    assert out_env.payload.naturalLanguage == "Local HTTP response"
+    mock_post.assert_called_once()
+    assert mock_post.call_args[0][0] == "http://127.0.0.1:8080/evaluate"
