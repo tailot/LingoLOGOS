@@ -1079,3 +1079,48 @@ The script `Activate.ps1` (`.venv-train/Scripts/Activate.ps1` and `scripts/Activ
 2. Checks for and idempotently creates `.venv-wsl` if missing.
 3. Activates `.venv-wsl` and installs Python dependencies from `requirements.txt`.
 4. Launches an interactive bash login shell ready for `lllayer` and Verilator execution.
+
+---
+
+## 15. In-Memory Constrained Decoding and AST Pruning Engine (`lllayer`)
+
+### 15.1 Mathematical Formulation of Constrained Autoregressive Decoding
+
+Let $\mathcal{V}$ be the vocabulary with cardinality $|\mathcal{V}| = N$. At each autoregressive step $t$, the runner model computes scoring function $\mathbf{z}_t = f_\theta(y_{<t}) \in \mathbb{R}^N$.
+
+Given abstract typed formal grammar $\mathcal{G} = (\Sigma, N, S, P, \mathcal{T})$, the incremental runtime maintains state $s_t \in \mathcal{S}$ with deterministic transition function:
+
+$$\delta: \mathcal{S} \times \mathcal{V} \to \mathcal{S} \cup \{\bot\}$$
+
+where $\bot$ indicates an invalid transition that violates formal grammar $\mathcal{G}$ or logical constraints $C_{\text{SMT}}$ evaluated on Z3.
+
+### 15.2 Zero-Copy In-Memory Vector Masking ($\mathcal{O}(1)$ Allocation)
+
+The set of admitted tokens at state $s_t$ is:
+
+$$\mathcal{A}(s_t) = \{ v \in \mathcal{V} \mid \delta(s_t, v) \neq \bot \}$$
+
+Volatile masking vector $\mathbf{m}_t \in \mathbb{R}^N$ allocated in RAM:
+
+$$m_{t,i} = \begin{cases} 0.0 & \text{if } i \in \mathcal{A}(s_t) \\ -\infty & \text{if } i \notin \mathcal{A}(s_t) \end{cases}$$
+
+Logits transformation prior to Softmax is computed in-place via Hadamard addition:
+
+$$\mathbf{\hat{z}}_t = \mathbf{z}_t + \mathbf{m}_t$$
+
+$$\lim_{m_{t,i} \to -\infty} P(y_t = i \mid y_{<t}, s_t) = \frac{\exp(z_{t,i} + m_{t,i})}{\sum_{j=1}^N \exp(z_{t,j} + m_{t,j})} = 0, \quad \forall i \notin \mathcal{A}(s_t)$$
+
+### 15.3 Deterministic AST Tree Pruning Operator
+
+Given an AST $T_A = (V_A, E_A)$, deterministic synthesis $T_B = \pi(T_A)$ applies projection operator $\pi$:
+
+$$\pi(v) = \begin{cases} v & \text{if } \mathrm{Type}(v) \in \mathcal{T}_{\text{essential}} \\ \emptyset & \text{if } \mathrm{Type}(v) \in \mathcal{T}_{\text{ancillary}} \end{cases}$$
+
+When encountering a node whose semantic salience is not essential (such as `OPTIONAL_MODIFIER`), the engine transitions into terminal closing state $\mathcal{S}_{\text{terminal\_closing}}$, masking all tokens except closing parenthesization tokens.
+
+### 15.4 C-FFI Native Accelerator and Pure Vector Fallback
+
+- **C-FFI Kernel (`src/lingologos_orchestrator/native/masker.cpp`)**: Exports `masker_init`, `masker_update_allowed`, `masker_apply_in_place`, and `masker_free`. Reuses contiguous RAM float buffer across steps with zero allocations inside the loop.
+- **Python Bridge (`src/lingologos_orchestrator/lllayer_masker.py`)**: `NativeASTLogitsProcessor` manages C pointers, zero-copy contiguous numpy array pass-through, and graceful fallback to numpy in memory.
+- **Incremental Engine (`src/lingologos_orchestrator/lllayer_engine.py`)**: `IncrementalASTEngine` drives step-by-step decoding, AST stack tracking, and subtree pruning triggers.
+- **CLI Flag (`lllayer`)**: `--constrained-decoding` activates the in-memory AST-guided logits masker for node execution.

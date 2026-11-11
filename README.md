@@ -864,6 +864,11 @@ Execute an isolated node CLI turn directly:
 lllayer --node-id agente_alfa --role proponent --node-dir datasets/agente_alfa < input_envelope.json
 ```
 
+Execute with in-memory volatile AST-guided logits masking and deterministic pruning:
+```bash
+lllayer --node-id agente_alfa --role proponent --node-dir datasets/agente_alfa --constrained-decoding < input_envelope.json
+```
+
 ---
 
 ## 14. Edge-NSAC Dynamic Board Topology (Single-Chip vs Multi-Chip)

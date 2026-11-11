@@ -14,6 +14,8 @@ from typing import Dict, Any, Optional
 
 from .schema import Envelope, VolatileState, Payload, SMTConstraints
 from .topology_ctrl import TopologyCtrlRegister
+from .lllayer_masker import NativeASTLogitsProcessor
+from .lllayer_engine import IncrementalASTEngine, SimpleASTGrammar, MockRunnerModel
 
 
 def discover_board_topology(
@@ -57,11 +59,60 @@ def read_file_if_exists(file_path: Path) -> Optional[str]:
     return None
 
 
+def run_constrained_ast_decoding(
+    node_id: str,
+    role: str,
+    incoming_ast: str,
+    vocab_size: int = 16,
+) -> str:
+    """Executes a volatile in-memory AST constrained decoding session."""
+    tokens = ["ROOT", "(", "Transition", "StateA", "StateB", ")", "END", "MODIFIER"]
+    token_to_id = {t: i for i, t in enumerate(tokens)}
+    id_to_token = {i: t for i, t in enumerate(tokens)}
+
+    node_types = {"MODIFIER": "OPTIONAL_MODIFIER"}
+    transitions = {
+        ("ROOT", "("): "NODE_OPN",
+        ("NODE_OPN", "Transition"): "NODE_TRANS",
+        ("NODE_TRANS", "StateA"): "NODE_S1",
+        ("NODE_S1", "StateB"): "NODE_S2",
+        ("NODE_S2", ")"): "TERMINAL",
+        ("NODE_TRANS", "MODIFIER"): "MODIFIER",
+        ("MODIFIER", ")"): "TERMINAL",
+    }
+    valid_tokens = {
+        "ROOT": {token_to_id["("]},
+        "NODE_OPN": {token_to_id["Transition"]},
+        "NODE_TRANS": {token_to_id["StateA"], token_to_id["MODIFIER"]},
+        "NODE_S1": {token_to_id["StateB"]},
+        "NODE_S2": {token_to_id[")"]},
+        "MODIFIER": {token_to_id[")"]},
+    }
+    closing_tokens = {token_to_id[")"]}
+
+    grammar = SimpleASTGrammar(
+        token_to_id=token_to_id,
+        id_to_token=id_to_token,
+        node_types=node_types,
+        transitions=transitions,
+        valid_tokens=valid_tokens,
+        closing_tokens=closing_tokens,
+        terminal_nodes={"TERMINAL", "END"},
+    )
+
+    processor = NativeASTLogitsProcessor(vocab_size=max(vocab_size, len(tokens)))
+    runner_model = MockRunnerModel(vocab_size=processor.vocab_size, token_to_id=token_to_id, id_to_token=id_to_token)
+    engine = IncrementalASTEngine(grammar_spec=grammar, logits_processor=processor)
+
+    return engine.run_session(prompt=incoming_ast, runner_model=runner_model)
+
+
 def generate_node_response(
     node_id: str,
     role: str,
     node_dir: Path,
     incoming: Envelope,
+    constrained_decoding: bool = False,
 ) -> Envelope:
     """Generates the next envelope from this node given the incoming message."""
     next_turn = incoming.turn
@@ -90,7 +141,13 @@ def generate_node_response(
     asserts = list(in_constraints.assertions)
     expected_status = "sat"
 
-    if role == "opponent":
+    if constrained_decoding:
+        natural_text = f"Node {node_id} constrained decoding response."
+        decoded_ast = run_constrained_ast_decoding(node_id, role, incoming.payload.abstractSyntaxTree)
+        ast = f"{decoded_ast} (Node {node_id})"
+        if not asserts:
+            asserts.append("(assert true)")
+    elif role == "opponent":
         # Opponent might contest transitions or assert safety boundary
         natural_text = f"Node {node_id} evaluating safety constraints for proposed transition."
         ast = f"ChallengeConstraint (Transition StateA StateB) (Node {node_id})"
@@ -141,6 +198,7 @@ def main() -> int:
     parser.add_argument("--probe-peers", type=int, default=0, help="Number of external peers discovered on board.")
     parser.add_argument("--dataset-id", type=int, default=0, help="Logical dataset ID assigned to this node.")
     parser.add_argument("--topology-ctrl-reg", type=str, default=None, help="Optional raw hex or JSON for TOPOLOGY_CTRL register.")
+    parser.add_argument("--constrained-decoding", action="store_true", help="Enable in-memory AST-guided logits masker decoding.")
     args = parser.parse_args()
 
     node_id = args.node_id
@@ -188,6 +246,7 @@ def main() -> int:
                 role=role,
                 node_dir=node_dir,
                 incoming=incoming_envelope,
+                constrained_decoding=args.constrained_decoding,
             )
             # Propagate or preserve topologyCtrl and datasetId
             envelope.topologyCtrl = topology_ctrl.to_dict()
