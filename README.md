@@ -869,6 +869,20 @@ Execute with in-memory volatile AST-guided logits masking and deterministic prun
 lllayer --node-id agente_alfa --role proponent --node-dir datasets/agente_alfa --constrained-decoding < input_envelope.json
 ```
 
+Host note for `--constrained-decoding`: the masking layer runs on Linux and on Windows. The loader
+picks the shared object name of the host, `masker.dll` on Windows, `libmasker.dylib` on macOS,
+`libmasker.so` elsewhere, and compiles `src/lingologos_orchestrator/native/masker.cpp` on the fly with
+any GCC compatible compiler it finds through `shutil.which` (`c++`, `g++`, `clang++`, or a MinGW-w64
+triplet on Windows). When no such compiler is installed, which is the case on a plain Windows
+workstation, `NativeASTLogitsProcessor` uses a persistent numpy buffer and applies exactly the same
+mask (`0.0` on admitted tokens, `-inf` elsewhere, Hadamard addition in place), so the emitted envelope
+is byte identical and only the per-step latency differs. `LINGOLOGOS_DISABLE_NATIVE_KERNEL=1` forces
+that branch on any host, and the test suite compares the two branches for equality. The flag is
+consumed exclusively by the isolated `lllayer` CLI, because `NodeProcessRunner` builds a fixed node
+command line without flag pass-through, so topology, federated, and consolidated sessions never
+activate it. The full matrix and the measured results are recorded in section 15.5 of
+`doc/TECHNICAL_DOCUMENTATION.md`.
+
 ---
 
 ## 14. Edge-NSAC Dynamic Board Topology (Single-Chip vs Multi-Chip)

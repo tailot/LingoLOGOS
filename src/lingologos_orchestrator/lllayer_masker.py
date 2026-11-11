@@ -1,55 +1,117 @@
 """Zero-copy in-memory logits masker for lllayer.
 
-Provides C-FFI accelerated logits masking and a pure Python fallback
-to guarantee O(1) allocation overhead and sub-millisecond masking latency.
+Provides C-FFI accelerated logits masking and a pure numpy fallback. Both branches
+run on Linux and on Windows: the kernel is compiled only when a GCC compatible C++
+toolchain is found, and the numpy fallback is the supported path when none is present.
+The two branches implement the same masking relation, so a node decodes identically on
+either host and only the per step latency differs.
 All text and docstrings follow AGENTS.md ASCII and English-only rules.
 """
 
 import ctypes
 import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
-from typing import Iterable, Optional, Set
+from typing import Iterable, List, Optional, Set
 import numpy as np
 
+NATIVE_SOURCE_NAME = "masker.cpp"
 
-def find_or_build_native_library() -> Optional[str]:
-    """Locates the pre-compiled libmasker.so or attempts on-the-fly compilation."""
-    module_dir = Path(__file__).resolve().parent
-    native_dir = module_dir / "native"
-    so_path = native_dir / "libmasker.so"
+# Environment switch used by deployments and by the parity tests to force the numpy
+# branch even on a host where the C kernel can be built.
+DISABLE_NATIVE_ENV_VAR = "LINGOLOGOS_DISABLE_NATIVE_KERNEL"
 
-    if so_path.is_file():
-        return str(so_path)
 
-    # Attempt to compile if source exists
-    cpp_source = native_dir / "masker.cpp"
-    if cpp_source.is_file():
+def native_disabled() -> bool:
+    """Returns True when the numpy branch is forced through the environment switch."""
+    return os.environ.get(DISABLE_NATIVE_ENV_VAR, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def library_filename(os_name: str, sys_platform: str) -> str:
+    """Maps a host identification to the shared object name of the masking kernel.
+
+    Windows uses a DLL, macOS a dylib, and every other POSIX host a shared object.
+    """
+    if os_name == "nt":
+        return "masker.dll"
+    if sys_platform == "darwin":
+        return "libmasker.dylib"
+    return "libmasker.so"
+
+
+def native_library_path() -> Path:
+    """Absolute path of the platform specific shared object inside the native folder."""
+    return Path(__file__).resolve().parent / "native" / library_filename(os.name, sys.platform)
+
+
+def compiler_candidates(os_name: str = os.name) -> List[str]:
+    """Returns the GCC compatible C++ compilers found on this host, in preference order.
+
+    The lookup goes through shutil.which, so no shell is spawned and no external probe
+    utility is required. That keeps the probe valid in PowerShell and in CMD on Windows,
+    where a POSIX shell probe always fails and writes noise onto the stderr stream that
+    the orchestrator parses for a node.
+    """
+    if os_name == "nt":
+        preferred = ("g++", "c++", "clang++", "x86_64-w64-mingw32-g++", "aarch64-w64-mingw32-g++")
+    else:
+        preferred = ("c++", "g++", "clang++")
+    found: List[str] = []
+    for name in preferred:
+        resolved = shutil.which(name)
+        if resolved and resolved not in found:
+            found.append(resolved)
+    return found
+
+
+def build_command(compiler: str, source: Path, target: Path) -> List[str]:
+    """Assembles the compiler invocation shared by every supported platform."""
+    return [compiler, "-O3", "-shared", "-fPIC", "-std=c++17", str(source), "-o", str(target)]
+
+
+def find_or_build_native_library(allow_build: bool = True) -> Optional[str]:
+    """Locates the platform shared object, compiling it once when a toolchain is present.
+
+    Returns None when the numpy branch is forced, when no compiler is installed, or when
+    every candidate compiler fails. Compiler output is captured to DEVNULL rather than
+    inherited, so a failed probe leaves nothing on the standard streams of a node whose
+    stdout the orchestrator parses as JSON.
+    """
+    if native_disabled():
+        return None
+
+    target = native_library_path()
+    if target.is_file():
+        return str(target)
+
+    source = target.parent / NATIVE_SOURCE_NAME
+    if not allow_build or not source.is_file():
+        return None
+
+    for compiler in compiler_candidates():
         try:
-            native_dir.mkdir(parents=True, exist_ok=True)
-            compiler = "g++" if os.system("which g++ > /dev/null 2>&1") == 0 else "clang++"
-            cmd = [
-                compiler,
-                "-O3",
-                "-shared",
-                "-fPIC",
-                "-std=c++17",
-                str(cpp_source),
-                "-o",
-                str(so_path),
-            ]
-            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if so_path.is_file():
-                return str(so_path)
-        except Exception:
-            return None
+            done = subprocess.run(
+                build_command(compiler, source, target),
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=180,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if done.returncode == 0 and target.is_file():
+            return str(target)
     return None
 
 
 class NativeASTLogitsProcessor:
     """LogitsProcessor integrated into lllayer internal tools.
 
-    Manages AST-constrained masking directly in RAM via C-FFI or vector fallback.
+    Manages AST-constrained masking directly in RAM through the C-FFI kernel when that
+    kernel was located or built, and through a persistent numpy buffer otherwise. The
+    selection is host independent and the masking result is identical on both branches.
     """
 
     def __init__(self, vocab_size: int, lib_path: Optional[str] = None):
