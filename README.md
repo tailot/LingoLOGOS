@@ -911,3 +911,21 @@ What has not been done to that module: it is not instantiated in `lingologos_top
 
 ### Windows PowerShell & WSL Bridge
 For cross-platform development on Windows host with isolated Linux execution, `.venv-train/Scripts/Activate.ps1` (and `scripts/Activate.ps1`) provides idempotent WSL environment bootstrap and auto-sync for dependencies and CLI tools.
+
+---
+
+## 15. Neuro-Symbolic Dataset Extraction (Full Pre-training Scale)
+
+The `extract/` directory hosts specifications and generator scripts for five neuro-symbolic datasets ($\mathcal{D}_1 \dots \mathcal{D}_5$) calibrated for full pre-training scale ($N = 1,000,000$ per dataset, total 5,000,000 samples):
+
+- **$\mathcal{D}_1$**: Grammatical Derivation & AST Mappings (GF RGL, 5 languages, depth $d \le 6$).
+- **$\mathcal{D}_2$**: Ontological Consistency & SMT Constraints (Z3 verified, 50% SAT / 50% UNSAT, Allen intervals).
+- **$\mathcal{D}_3$**: Multi-Domain Command Execution (10 domains, multi-agent payloads for `agente_alfa`, `agente_beta`, `arbitro_logico`).
+- **$\mathcal{D}_4$**: Syntactic Robustness & Anti-Hallucination ($N/2$ Dyck-2 nested structures, noise injection).
+- **$\mathcal{D}_5$**: Dynamic Logit Masking (Automata state transitions, active bitset vectors).
+
+Run extraction via CLI:
+```bash
+python3 extract/pipeline.py --dataset ALL --num-samples 1000 --seed 42 --output-dir extract/output
+```
+See `extract/README.md` and `extract/SPECIFICATIONS.md` for technical specifications.

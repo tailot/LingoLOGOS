@@ -1225,3 +1225,38 @@ matters when the flag is evaluated against topologies and datasets.
   algebra over the tokenizer ids. The `lllayer` engine consumes neither `artifacts/grammar.json` nor
   the tokenizer, so the `lllayer_masker` kernel is a separate, smaller mechanism that a future change
   is expected to fold into that automaton.
+
+---
+
+## 16. Full Pre-training Scale Dataset Architecture (`extract/`)
+
+The repository includes a dedicated dataset synthesis and formal validation architecture under `extract/` calibrated exclusively for full pre-training scale ($N = 1,000,000$ samples per dataset across five target datasets $\mathcal{D}_1 \dots \mathcal{D}_5$, for a total volume of 5,000,000 samples).
+
+### 16.1 Dataset Matrix and Specialization
+
+1. **$\mathcal{D}_1$: Grammatical Derivation & AST Mappings (`extract/d1_gf_ast.py`)**
+   - Natural language to AST projections verified against Grammatical Framework (GF) Resource Grammar Library (RGL).
+   - Uniform multilingual distribution over five languages (`it`, `en`, `fr`, `de`, `es`).
+   - Abstract syntax tree depth bound $d \le 6$.
+2. **$\mathcal{D}_2$: Ontological Consistency & SMT Constraints (`extract/d2_smt_consistency.py`)**
+   - Semantic queries paired with SMT-LIB2 assertion blocks verified through Z3.
+   - Strict 50/50 balance between SAT and UNSAT instances.
+   - Ontological constraints covering Allen temporal interval relations, partial orderings, and finite domain bounds.
+3. **$\mathcal{D}_3$: Multi-Domain Command Execution (`extract/d3_command_execution.py`)**
+   - Multi-agent conversational prompts paired with executable JSON payloads targeting `agente_alfa`, `agente_beta`, and `arbitro_logico`.
+   - Balanced distribution over ten vertical application domains ($100,000$ samples each).
+   - High-arity parameter structures and volatile runtime context metadata.
+4. **$\mathcal{D}_4$: Syntactic Robustness & Anti-Hallucination (`extract/d4_syntactic_robustness.py`)**
+   - Negative controls and corruption pairs `(Corrupted, Error_Type, Corrected)`.
+   - Dedicated allocation of $N/2$ samples to Dyck-2 nested structures for internal stack tracking verification.
+   - Controlled error injection covering out-of-vocabulary tokens, delimiter imbalance, arity violations, and type mismatches.
+5. **$\mathcal{D}_5$: Dynamic Logit Masking (`extract/d5_logit_masking.py`)**
+   - Step-by-step prefix sequences paired with active mask bitsets and admissible token sets for `VolatileLogitsMasker`.
+   - Direct correspondence between LLM token vocabulary identifiers and grammar terminal symbols.
+
+### 16.2 Pipeline CLI and Storage Footprint
+
+The extraction pipeline is driven via `extract/pipeline.py`:
+- Deterministic reproduction via `--seed 42`.
+- Formats supported: `.jsonl` and compressed streaming.
+- Target volume: 5.0 to 8.0 GB compressed (approx. 30 to 45 GB uncompressed text).
