@@ -1079,3 +1079,149 @@ The script `Activate.ps1` (`.venv-train/Scripts/Activate.ps1` and `scripts/Activ
 2. Checks for and idempotently creates `.venv-wsl` if missing.
 3. Activates `.venv-wsl` and installs Python dependencies from `requirements.txt`.
 4. Launches an interactive bash login shell ready for `lllayer` and Verilator execution.
+
+---
+
+## 15. In-Memory Constrained Decoding and AST Pruning Engine (`lllayer`)
+
+### 15.1 Mathematical Formulation of Constrained Autoregressive Decoding
+
+Let $\mathcal{V}$ be the vocabulary with cardinality $|\mathcal{V}| = N$. At each autoregressive step $t$, the runner model computes scoring function $\mathbf{z}_t = f_\theta(y_{<t}) \in \mathbb{R}^N$.
+
+Given abstract typed formal grammar $\mathcal{G} = (\Sigma, N, S, P, \mathcal{T})$, the incremental runtime maintains state $s_t \in \mathcal{S}$ with deterministic transition function:
+
+$$\delta: \mathcal{S} \times \mathcal{V} \to \mathcal{S} \cup \{\bot\}$$
+
+where $\bot$ indicates an invalid transition that violates formal grammar $\mathcal{G}$ or logical constraints $C_{\text{SMT}}$ evaluated on Z3.
+
+### 15.2 Zero-Copy In-Memory Vector Masking ($\mathcal{O}(1)$ Allocation)
+
+The set of admitted tokens at state $s_t$ is:
+
+$$\mathcal{A}(s_t) = \{ v \in \mathcal{V} \mid \delta(s_t, v) \neq \bot \}$$
+
+Volatile masking vector $\mathbf{m}_t \in \mathbb{R}^N$ allocated in RAM:
+
+$$m_{t,i} = \begin{cases} 0.0 & \text{if } i \in \mathcal{A}(s_t) \\ -\infty & \text{if } i \notin \mathcal{A}(s_t) \end{cases}$$
+
+Logits transformation prior to Softmax is computed in-place via Hadamard addition:
+
+$$\mathbf{\hat{z}}_t = \mathbf{z}_t + \mathbf{m}_t$$
+
+$$\lim_{m_{t,i} \to -\infty} P(y_t = i \mid y_{<t}, s_t) = \frac{\exp(z_{t,i} + m_{t,i})}{\sum_{j=1}^N \exp(z_{t,j} + m_{t,j})} = 0, \quad \forall i \notin \mathcal{A}(s_t)$$
+
+### 15.3 Deterministic AST Tree Pruning Operator
+
+Given an AST $T_A = (V_A, E_A)$, deterministic synthesis $T_B = \pi(T_A)$ applies projection operator $\pi$:
+
+$$\pi(v) = \begin{cases} v & \text{if } \mathrm{Type}(v) \in \mathcal{T}_{\text{essential}} \\ \emptyset & \text{if } \mathrm{Type}(v) \in \mathcal{T}_{\text{ancillary}} \end{cases}$$
+
+When encountering a node whose semantic salience is not essential (such as `OPTIONAL_MODIFIER`), the engine transitions into terminal closing state $\mathcal{S}_{\text{terminal\_closing}}$, masking all tokens except closing parenthesization tokens.
+
+### 15.4 C-FFI Native Accelerator and Pure Vector Fallback
+
+- **C-FFI Kernel (`src/lingologos_orchestrator/native/masker.cpp`)**: Exports `masker_init`, `masker_update_allowed`, `masker_apply_in_place`, and `masker_free`. Reuses contiguous RAM float buffer across steps with zero allocations inside the loop.
+- **Python Bridge (`src/lingologos_orchestrator/lllayer_masker.py`)**: `NativeASTLogitsProcessor` manages C pointers, zero-copy contiguous numpy array pass-through, and graceful fallback to numpy in memory.
+- **Incremental Engine (`src/lingologos_orchestrator/lllayer_engine.py`)**: `IncrementalASTEngine` drives step-by-step decoding, AST stack tracking, and subtree pruning triggers.
+- **CLI Flag (`lllayer`)**: `--constrained-decoding` activates the in-memory AST-guided logits masker for node execution.
+
+### 15.5 Host Support for the Masking Kernel
+
+The masking layer runs on Linux and on Windows, and the selection between the two kernels never
+goes through a shell:
+
+- `library_filename(os_name, sys_platform)` maps the host to the shared object name of the kernel:
+  `masker.dll` on Windows, `libmasker.dylib` on macOS, `libmasker.so` on every other POSIX system.
+  `native_library_path()` resolves that name inside `src/lingologos_orchestrator/native/`.
+- `compiler_candidates()` collects GCC compatible compilers with `shutil.which`, preferring `c++`,
+  `g++`, and `clang++`, and additionally the `x86_64-w64-mingw32-g++` and `aarch64-w64-mingw32-g++`
+  triplets on Windows. No shell is spawned and no external probe utility is invoked, so the lookup is
+  valid in PowerShell and in CMD exactly as in bash.
+- `build_command()` produces the single GCC flavored invocation
+  `-O3 -shared -fPIC -std=c++17 <source> -o <target>`, and the compiler output is captured to
+  `DEVNULL` instead of being inherited, because the orchestrator parses node stdout as JSON and the
+  node stderr must stay empty.
+- `find_or_build_native_library()` returns the located or freshly compiled kernel, or `None`. Returning
+  `None` is a supported outcome rather than an error: `NativeASTLogitsProcessor` then keeps the
+  persistent numpy buffer and applies the identical mask.
+- `LINGOLOGOS_DISABLE_NATIVE_KERNEL=1` forces the numpy branch on any host. Deployments use it to
+  suppress the on-the-fly compilation, and the parity tests use it to pin the two branches.
+- MSVC `cl` is not a candidate, because the invocation above is GCC flavored. Windows acceleration
+  therefore needs MinGW-w64 `g++` or LLVM `clang++`; without one the numpy branch runs and the decoded
+  output does not change.
+
+| Host | Kernel actually used | Evidence measured on this checkout |
+| --- | --- | --- |
+| WSL Ubuntu, `c++` and `g++` present | compiled `libmasker.so` | `is_native` is `True`; over `(2.0, 1.0, 5.0, 3.0, 4.0)` with admitted set `{1, 3}` the mask yields `[-inf, 1.0, -inf, 3.0, -inf]`; the masker test file runs `12 passed` |
+| Windows PowerShell, no C++ compiler installed | numpy buffer | `is_native` is `False`; the same mask vector is produced; masker file `11 passed, 1 skipped`; whole suite `243 passed, 1 skipped`, zero failures |
+| Windows with MinGW-w64 or LLVM clang | `masker.dll` | Expected by symmetry with the Linux branch. Not exercised on this machine: no C++ compiler is installed on the Windows side, and the WSL distribution cannot take the sudo password needed to install a cross toolchain |
+
+Both branches satisfy the same equivalence gate of section 15.2: `test_native_kernel_matches_numpy_reference`
+compares the C kernel against the numpy buffer over six admission sets on a 64 wide vocabulary and
+requires `np.array_equal`, and `test_reference_decoding_is_identical_on_both_kernels` requires the
+decoded AST to be identical whichever branch decoded it. Generated binaries stay untracked, because
+`.gitignore` lists `*.so`, `*.dylib`, and `*.dll` in agreement with the zero binary rule of `AGENTS.md`.
+
+### 15.6 Cross-Platform Test Contract
+
+`tests/test_lllayer_masker.py` must be green on both hosts, and its assertions are written so that
+they are:
+
+- `test_library_filename_matches_every_supported_host` pins the three names and checks that the host
+  executing the test receives exactly the file name its loader can open.
+- `test_compiler_lookup_stays_free_of_posix_shell_probes` is the regression gate for the previous
+  implementation, which shelled out to `which(1)` with a redirection onto the POSIX null device. That
+  probe always failed on Windows and wrote two error lines onto stderr, which a node protocol must
+  never emit. The gate rejects those constructs in the module source and asserts that every resolved
+  candidate is a real file.
+- `test_lllayer_cli_constrained_decoding_flag` mirrors `NodeProcessRunner._child_environment`: it
+  prepends the absolute folder holding the package to `PYTHONPATH` for the child interpreter and pins
+  `cwd` to the checkout root, so the relative `datasets/agente_alfa` path resolves from any starting
+  directory. It also asserts that the child stderr is empty. The earlier version relied on the pytest
+  `pythonpath = ["src", "."]` ini option, which pytest injects into its own process only, so the child
+  aborted with `ModuleNotFoundError` on every platform.
+- `test_environment_switch_selects_the_numpy_branch` validates the documented switch on any host.
+- The only conditional test is the native versus numpy comparison, which reports an explicit skip
+  reason naming the compilers it searched for. Everything else runs identically on both platforms.
+
+Recorded status: Windows host `243 passed, 1 skipped, 0 failed`. Linux, checked inside WSL Ubuntu with
+a temporary environment holding `numpy`, `pytest`, `z3-solver`, and `httpx`: masker test file
+`12 passed`, including the native comparison that skips on Windows. The `.venv-wsl` environment stored
+in the checkout still holds no installed dependencies, so a Linux session run needs the setup command
+of section 14 that installs `requirements.txt`.
+
+### 15.7 Integration Boundary of the Introduced Engine
+
+The current engine is a reference harness rather than the production decoding path, and the boundary
+matters when the flag is evaluated against topologies and datasets.
+
+- **Fixed reference grammar**: `run_constrained_ast_decoding(node_id, role, incoming_ast, vocab_size)`
+  builds a hard-coded eight token micro-grammar (`ROOT`, `(`, `Transition`, `StateA`, `StateB`, `)`,
+  `END`, `MODIFIER`). The incoming AST reaches `run_session` as `prompt` and is never consumed, and
+  the node folder (`grammar.gf`, `ontology.smt2`, `seed_payload.json`) is never read. Measured on the
+  three shipped datasets, the decoded AST is the same string
+  `( Transition StateA StateB ) (Node <node_id>)` for `agente_alfa`, `agente_beta`, and
+  `arbitro_logico`, regardless of the AST carried by the envelope.
+- **Pruning stays dormant through the CLI**: `MockRunnerModel.get_logits` returns a constant vector
+  and `sample` takes the greedy argmax, so at `NODE_TRANS` the lower indexed essential token wins over
+  `MODIFIER` and the ancillary projection $\pi$ of section 15.3 is never triggered. Only the dedicated
+  unit test, which restricts `NODE_TRANS` to the modifier token, exercises that branch.
+- **Dataset turn payloads bypass the masker**: a folder holding `turn_<n>_payload.json`
+  short-circuits `generate_node_response` before the masking branch, so recorded payloads take
+  precedence over constrained decoding. No such file ships under `datasets/` today.
+- **Topology handling is unaffected**: the flag changes only the payload content. `topologyCtrl` and
+  `datasetId` are still attached after generation, verified with
+  `--hardware-node-id 3 --probe-peers 2 --dataset-id 1`, which yields
+  `standalone=0`, `node_id=3`, `total_nodes=3`, `dataset_id=1`, `raw_hex=0x00000266`.
+- **Multi-node sessions cannot activate it**: `NodeProcessRunner.execute_turn` composes the fixed
+  flag list `--node-id`, `--role`, `--node-dir`, `--hardware-node-id`, `--probe-peers`,
+  `--dataset-id`, plus optional `--topology-ctrl-reg`, with no pass-through, and the orchestrator CLI
+  exposes no equivalent switch. A session over `config/topology.json` completes with
+  `Termination reason: SAT_CONVERGENCE`, `Verdict: PASS`, and no turn of the transcript carries the
+  constrained decoding payload, so `--constrained-decoding` is currently an isolated single-node
+  capability.
+- **Two masking stacks are not unified yet**: grammar driven masking for the learned model lives in
+  `src/neuro_symbolic/masking.py` through `AlgebraMask` and `TokenStreamMask`, which walk the bracket
+  algebra over the tokenizer ids. The `lllayer` engine consumes neither `artifacts/grammar.json` nor
+  the tokenizer, so the `lllayer_masker` kernel is a separate, smaller mechanism that a future change
+  is expected to fold into that automaton.

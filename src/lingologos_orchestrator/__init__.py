@@ -31,6 +31,13 @@ from .event_bus import EventBus, DynamicNodeSpawner
 from .solver_pool import SMTSolverPool, SolverTask
 from .consolidation import ModelConsolidator, ConsolidatedModel
 from .orchestrator import MultiInstanceOrchestrator, ExecutionResult, TurnRecord
+from .lllayer_masker import NativeASTLogitsProcessor
+from .lllayer_engine import (
+    IncrementalASTEngine,
+    IncrementalGrammarSpec,
+    SimpleASTGrammar,
+    MockRunnerModel,
+)
 
 __version__ = "0.2.0"
 
@@ -68,4 +75,9 @@ __all__ = [
     "MultiInstanceOrchestrator",
     "ExecutionResult",
     "TurnRecord",
+    "NativeASTLogitsProcessor",
+    "IncrementalASTEngine",
+    "IncrementalGrammarSpec",
+    "SimpleASTGrammar",
+    "MockRunnerModel",
 ]
