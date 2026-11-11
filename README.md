@@ -817,6 +817,16 @@ Run the orchestrator:
 lingologos-orchestrator --config config/topology.json --datasets datasets/ --runtime-state runtime_state/
 ```
 
+Run with federated mesh topology:
+```bash
+lingologos-orchestrator --config topologies/federated_mesh.json --datasets datasets/
+```
+
+Run with topology consolidation into a verification triad:
+```bash
+lingologos-orchestrator --config topologies/federated_mesh.json --datasets datasets/ --consolidate triad
+```
+
 Execute an isolated node CLI turn directly:
 ```bash
 lllayer --node-id agente_alfa --role proponent --node-dir datasets/agente_alfa < input_envelope.json

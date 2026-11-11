@@ -20,14 +20,18 @@ from .schema import (
     VolatileState,
     SMTConstraints,
     Payload,
+    FederatedTopologyConfig,
     OrchestratorError,
     StaticValidationError,
     RoutingError,
     SchemaValidationError,
 )
 from .verifier import Z3Verifier, SMTVerificationResult
-from .node_runner import NodeProcessRunner
+from .node_runner import NodeProcessRunner, HttpNodeRunner
 from .topology_ctrl import TopologyCtrlRegister
+from .resolver import NodeResolver, resolve_node_transport
+from .event_bus import EventBus
+from .solver_pool import SMTSolverPool, SolverTask
 
 
 @dataclass
@@ -93,11 +97,15 @@ class MultiInstanceOrchestrator:
             else self.workspace_dir / "runtime_state"
         )
         self.verifier = Z3Verifier()
-        self.runners: Dict[str, NodeProcessRunner] = {}
+        self.runners: Dict[str, Any] = {}
         self.ontologies: Dict[str, str] = {}
         self.grammars: Dict[str, str] = {}
         self.initial_envelopes: Dict[str, Envelope] = {}
         self.topology_ctrl_by_node: Dict[str, TopologyCtrlRegister] = {}
+        self.event_bus = EventBus()
+        self.solver_pool = SMTSolverPool()
+        self.federated_config: Optional[FederatedTopologyConfig] = None
+        self.resolver = NodeResolver(workspace_dir=self.workspace_dir)
 
     @classmethod
     def from_config_file(
@@ -107,12 +115,26 @@ class MultiInstanceOrchestrator:
         runtime_state_dir: Optional[Path] = None,
         workspace_dir: Optional[Path] = None,
     ) -> "MultiInstanceOrchestrator":
-        """Builds an orchestrator from a topology JSON file."""
+        """Builds an orchestrator from a topology or federated JSON file."""
         cfg_file = Path(config_path).resolve()
         if not cfg_file.is_file():
             raise FileNotFoundError(f"Topology configuration file not found: {cfg_file}")
         with open(cfg_file, "r", encoding="utf-8") as f:
             data = json.load(f)
+
+        # Detect whether file is a federated mesh topology
+        if "federation_name" in data and "nodes" in data:
+            fed_config = FederatedTopologyConfig.from_dict(data)
+            topology_config = fed_config.to_legacy_topology()
+            orch = cls(
+                config=topology_config,
+                datasets_dir=datasets_dir,
+                runtime_state_dir=runtime_state_dir,
+                workspace_dir=workspace_dir,
+            )
+            orch.federated_config = fed_config
+            return orch
+
         config = TopologyConfig.from_dict(data)
         return cls(
             config=config,
@@ -125,20 +147,34 @@ class MultiInstanceOrchestrator:
     # Phase 01: Static Validation
     # -------------------------------------------------------------------------
     def validate_static(self) -> bool:
-        """Validates schema, filesystem conventions, and SMT syntax for all nodes.
-
-        Filesystem convention:
-          /datasets/{node_id}/
-            ├── ontology.smt2
-            ├── grammar.gf
-            └── seed_payload.json
-        """
-        if not self.datasets_dir.is_dir():
-            raise StaticValidationError(f"Datasets directory not found: {self.datasets_dir}")
+        """Validates schema, filesystem conventions, and SMT syntax for all nodes."""
+        fed_map = {n.node_id: n for n in self.federated_config.nodes} if self.federated_config else {}
 
         for instance in self.config.instances:
             node_id = instance.id
+            fed_node = fed_map.get(node_id)
+
+            if fed_node and fed_node.transport == "http":
+                # Remote HTTP endpoint: minimal synthetic seed and axioms
+                self.ontologies[node_id] = ""
+                self.grammars[node_id] = ""
+                seed_envelope = Envelope(
+                    sender=node_id,
+                    recipient=node_id,
+                    turn=0,
+                    volatileState=VolatileState(internalTimeTick=0),
+                    payload=Payload(
+                        naturalLanguage=f"Remote HTTP Node {node_id} initialized",
+                        abstractSyntaxTree=f"RemoteRoot ({node_id})",
+                        smtConstraints=SMTConstraints(declarations=[], assertions=[]),
+                    ),
+                )
+                self.initial_envelopes[node_id] = seed_envelope
+                continue
+
             node_dir = self.datasets_dir / node_id
+            if fed_node and fed_node.transport == "git" and fed_node.local_cache_path:
+                node_dir = (self.workspace_dir / fed_node.local_cache_path).resolve()
 
             if not node_dir.is_dir():
                 raise StaticValidationError(
@@ -246,20 +282,35 @@ class MultiInstanceOrchestrator:
         self.runtime_state_dir.mkdir(parents=True, exist_ok=True)
         self.negotiate_topology()
 
+        fed_map = {n.node_id: n for n in self.federated_config.nodes} if self.federated_config else {}
+
         for instance in self.config.instances:
-            runner = NodeProcessRunner(
-                node_id=instance.id,
-                executable=instance.executable,
-                role=instance.role,
-                datasets_dir=self.datasets_dir,
-                workspace_dir=self.workspace_dir,
-            )
-            reg = self.topology_ctrl_by_node.get(instance.id)
-            if reg:
-                runner.hardware_node_id = reg.node_id
-                runner.probe_peers = reg.total_nodes - 1 if reg.total_nodes > 1 else 0
-                runner.dataset_id = reg.dataset_id
-                runner.topology_ctrl_reg = f"0x{reg.pack():08X}"
+            fed_node = fed_map.get(instance.id)
+            if fed_node and fed_node.transport == "http" and fed_node.endpoint_url:
+                runner = HttpNodeRunner(
+                    node_id=instance.id,
+                    endpoint_url=fed_node.endpoint_url,
+                    role=instance.role,
+                    auth_method=fed_node.auth_method,
+                )
+            else:
+                datasets_path = self.datasets_dir
+                if fed_node and fed_node.transport == "git" and fed_node.local_cache_path:
+                    datasets_path = (self.workspace_dir / fed_node.local_cache_path).parent.resolve()
+
+                runner = NodeProcessRunner(
+                    node_id=instance.id,
+                    executable=instance.executable,
+                    role=instance.role,
+                    datasets_dir=datasets_path,
+                    workspace_dir=self.workspace_dir,
+                )
+                reg = self.topology_ctrl_by_node.get(instance.id)
+                if reg:
+                    runner.hardware_node_id = reg.node_id
+                    runner.probe_peers = reg.total_nodes - 1 if reg.total_nodes > 1 else 0
+                    runner.dataset_id = reg.dataset_id
+                    runner.topology_ctrl_reg = f"0x{reg.pack():08X}"
             self.runners[instance.id] = runner
 
     # -------------------------------------------------------------------------
@@ -352,6 +403,12 @@ class MultiInstanceOrchestrator:
             )
             records.append(record)
             current_payload_by_node[sender_id] = output_envelope
+
+            # Publish turn envelope to event bus for streaming subscribers
+            self.event_bus.publish(
+                topic=f"channel/{sender_id}/{actual_recipient}",
+                envelope=output_envelope,
+            )
 
             # Phase 04: Termination Conditions Check
             cond = self.config.terminationCondition

@@ -880,6 +880,29 @@ The orchestrator evaluates termination condition $\mathcal{C}$ at each turn $k$:
 - **SAT Convergence**: If $\mathrm{Check}(\mathcal{T}_k) = \mathrm{sat}$ continuously across all active edges $|E|$, consensus is certified and the session terminates successfully with `SAT_CONVERGENCE`.
 - **Turn Bound Exhaustion**: If $k = \text{maxTurns}$ is reached without convergence or breaker trip, the session halts with `MAX_TURNS_REACHED`.
 
+### 13.5 Federated Infrastructure and Universal Transport Resolver
+
+The orchestrator supports universal federation across heterogeneous execution environments:
+
+1. **Local Transport (`local`)**: Resolves directly to the local filesystem workspace.
+2. **Git Transport (`git`)**: Synchronizes remote modules dynamically into a local cache directory using shallow clones (`depth 1`) and pull operations.
+3. **HTTP Transport (`http`)**: Offloads reasoning, parsing, or SMT verification to remote stateless HTTP/REST endpoints via POST requests with authorization headers.
+
+The `NodeResolver` unifies specification access for grammars (`grammar.gf`), ontologies (`ontology.smt2`), and seed payloads (`seed_payload.json`).
+
+### 13.6 Infinite Node Scalability ($N \to \infty$)
+
+To scale beyond static $N$-node configurations:
+- **Event-Driven Message Bus (`EventBus`)**: Enables topic-based asynchronous publish and subscribe decoupling direct node-to-node channels.
+- **Dynamic Node Spawner (`DynamicNodeSpawner`)**: Generates sub-agent instances on demand at runtime based on task complexity.
+- **Centralized SMT Solver Pool (`SMTSolverPool`)**: Coordinates multi-threaded worker pools executing concurrent Z3 constraint evaluations.
+
+### 13.7 Model Consolidation
+
+The `ModelConsolidator` contracts complex $N$-node federated or multi-agent topologies:
+- **Triad Consolidation**: Collapses $N$ nodes into three functional macro-nodes (`macro_proponent`, `macro_opponent`, `macro_validator`) with consolidated edge projections.
+- **Unified Consolidation**: Collapses the entire topology into a single unified local execution macro-engine (`unified_macro_engine`).
+
 ---
 
 ## 14. Edge-NSAC Dynamic Board Topology (Single-Chip vs Multi-Chip)

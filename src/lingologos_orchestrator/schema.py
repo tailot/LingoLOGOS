@@ -330,3 +330,239 @@ class TopologyConfig:
         """Checks if a directed edge exists from from_node to to_node."""
         adj = self.get_adjacency_map()
         return to_node in adj.get(from_node, [])
+
+
+@dataclass
+class NodeSpecs:
+    """Formal specifications pointing to grammar, ontology, and seed payload."""
+    grammar: str
+    ontology: str
+    seed: str
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "NodeSpecs":
+        if not isinstance(data, dict):
+            raise SchemaValidationError("NodeSpecs must be a dictionary.")
+        grammar = data.get("grammar")
+        ontology = data.get("ontology")
+        seed = data.get("seed")
+
+        if not isinstance(grammar, str) or not grammar.strip():
+            raise SchemaValidationError("specs.grammar must be a non-empty string.")
+        if not isinstance(ontology, str) or not ontology.strip():
+            raise SchemaValidationError("specs.ontology must be a non-empty string.")
+        if not isinstance(seed, str) or not seed.strip():
+            raise SchemaValidationError("specs.seed must be a non-empty string.")
+
+        return cls(grammar=grammar, ontology=ontology, seed=seed)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "grammar": self.grammar,
+            "ontology": self.ontology,
+            "seed": self.seed,
+        }
+
+
+@dataclass
+class FederatedNodeConfig:
+    """Configuration for a node in a federated topology mesh."""
+    node_id: str
+    role: str
+    transport: str = "local"
+    specs: Optional[NodeSpecs] = None
+    remote_source: Optional[str] = None
+    branch: Optional[str] = None
+    local_cache_path: Optional[str] = None
+    endpoint_url: Optional[str] = None
+    auth_method: Optional[str] = None
+    outbound_channels: List[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "FederatedNodeConfig":
+        if not isinstance(data, dict):
+            raise SchemaValidationError("Federated node config must be a dictionary.")
+        node_id = data.get("node_id")
+        role = data.get("role", "node")
+        transport = data.get("transport", "local").lower()
+
+        if not isinstance(node_id, str) or not node_id.strip():
+            raise SchemaValidationError("node_id must be a non-empty string.")
+        if not isinstance(role, str) or not role.strip():
+            raise SchemaValidationError("role must be a non-empty string.")
+        if transport not in ("local", "git", "http"):
+            raise SchemaValidationError(f"Unsupported transport: {transport}. Must be local, git, or http.")
+
+        specs = None
+        if "specs" in data and isinstance(data["specs"], dict):
+            specs = NodeSpecs.from_dict(data["specs"])
+
+        remote_source = data.get("remote_source")
+        branch = data.get("branch")
+        local_cache_path = data.get("local_cache_path")
+        endpoint_url = data.get("endpoint_url")
+        auth_method = data.get("auth_method")
+        outbound = data.get("outbound_channels", [])
+
+        if not isinstance(outbound, list) or not all(isinstance(x, str) for x in outbound):
+            raise SchemaValidationError("outbound_channels must be a list of strings.")
+
+        if transport == "git":
+            if not remote_source or not isinstance(remote_source, str):
+                raise SchemaValidationError("remote_source is required for git transport.")
+        elif transport == "http":
+            if not endpoint_url or not isinstance(endpoint_url, str):
+                raise SchemaValidationError("endpoint_url is required for http transport.")
+
+        return cls(
+            node_id=node_id,
+            role=role,
+            transport=transport,
+            specs=specs,
+            remote_source=remote_source,
+            branch=branch,
+            local_cache_path=local_cache_path,
+            endpoint_url=endpoint_url,
+            auth_method=auth_method,
+            outbound_channels=list(outbound),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        res: Dict[str, Any] = {
+            "node_id": self.node_id,
+            "role": self.role,
+            "transport": self.transport,
+            "outbound_channels": list(self.outbound_channels),
+        }
+        if self.specs is not None:
+            res["specs"] = self.specs.to_dict()
+        if self.remote_source is not None:
+            res["remote_source"] = self.remote_source
+        if self.branch is not None:
+            res["branch"] = self.branch
+        if self.local_cache_path is not None:
+            res["local_cache_path"] = self.local_cache_path
+        if self.endpoint_url is not None:
+            res["endpoint_url"] = self.endpoint_url
+        if self.auth_method is not None:
+            res["auth_method"] = self.auth_method
+        return res
+
+
+@dataclass
+class FederatedRoutingRule:
+    """Routing rule between federated nodes with trigger conditions."""
+    source: str
+    target: str
+    condition: str
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "FederatedRoutingRule":
+        if not isinstance(data, dict):
+            raise SchemaValidationError("Federated routing rule must be a dictionary.")
+        source = data.get("source")
+        target = data.get("target")
+        condition = data.get("condition", "DEFAULT")
+
+        if not isinstance(source, str) or not source.strip():
+            raise SchemaValidationError("source must be a non-empty string.")
+        if not isinstance(target, str) or not target.strip():
+            raise SchemaValidationError("target must be a non-empty string.")
+        if not isinstance(condition, str):
+            raise SchemaValidationError("condition must be a string.")
+
+        return cls(source=source, target=target, condition=condition)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "source": self.source,
+            "target": self.target,
+            "condition": self.condition,
+        }
+
+
+@dataclass
+class FederatedTopologyConfig:
+    """Federated multi-node mesh topology specification."""
+    federation_name: str
+    version: str
+    description: str
+    nodes: List[FederatedNodeConfig]
+    routing_rules: List[FederatedRoutingRule]
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "FederatedTopologyConfig":
+        if not isinstance(data, dict):
+            raise SchemaValidationError("Federated topology config must be a dictionary.")
+
+        fed_name = data.get("federation_name")
+        version = data.get("version", "2.0.0")
+        desc = data.get("description", "")
+        nodes_raw = data.get("nodes")
+        rules_raw = data.get("routing_rules", [])
+
+        if not isinstance(fed_name, str) or not fed_name.strip():
+            raise SchemaValidationError("federation_name must be a non-empty string.")
+        if not isinstance(nodes_raw, list) or len(nodes_raw) == 0:
+            raise SchemaValidationError("nodes must be a non-empty list.")
+        if not isinstance(rules_raw, list):
+            raise SchemaValidationError("routing_rules must be a list.")
+
+        nodes = [FederatedNodeConfig.from_dict(n) for n in nodes_raw]
+        node_ids = [n.node_id for n in nodes]
+        if len(node_ids) != len(set(node_ids)):
+            raise SchemaValidationError("Duplicate node_id values are not permitted in federation.")
+
+        rules = [FederatedRoutingRule.from_dict(r) for r in rules_raw]
+        known_ids = set(node_ids)
+        for r in rules:
+            if r.source not in known_ids:
+                raise SchemaValidationError(f"Rule source '{r.source}' not declared in nodes.")
+            if r.target not in known_ids:
+                raise SchemaValidationError(f"Rule target '{r.target}' not declared in nodes.")
+
+        return cls(
+            federation_name=fed_name,
+            version=version,
+            description=desc,
+            nodes=nodes,
+            routing_rules=rules,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "federation_name": self.federation_name,
+            "version": self.version,
+            "description": self.description,
+            "nodes": [n.to_dict() for n in self.nodes],
+            "routing_rules": [r.to_dict() for r in self.routing_rules],
+        }
+
+    def to_legacy_topology(self, max_turns: int = 15) -> TopologyConfig:
+        """Converts federated configuration to TopologyConfig for orchestrator execution."""
+        instances = [
+            InstanceConfig(id=n.node_id, executable="lllayer", role=n.role)
+            for n in self.nodes
+        ]
+        adjacency: Dict[str, List[str]] = {n.node_id: [] for n in self.nodes}
+        for n in self.nodes:
+            for out in n.outbound_channels:
+                if out in adjacency and out not in adjacency[n.node_id]:
+                    adjacency[n.node_id].append(out)
+        for rule in self.routing_rules:
+            if rule.target not in adjacency[rule.source]:
+                adjacency[rule.source].append(rule.target)
+
+        routing_matrix = [
+            RoutingRule(from_node=src, to_nodes=targets)
+            for src, targets in adjacency.items()
+            if targets
+        ]
+
+        return TopologyConfig(
+            sessionId=self.federation_name,
+            maxTurns=max_turns,
+            terminationCondition="Z3_SAT_CONVERGENCE_OR_UNSAT_BREAKER",
+            instances=instances,
+            routingMatrix=routing_matrix,
+        )

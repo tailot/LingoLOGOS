@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .orchestrator import MultiInstanceOrchestrator
 from .schema import OrchestratorError
+from .consolidation import ModelConsolidator
 
 
 def main() -> int:
@@ -45,6 +46,12 @@ def main() -> int:
         action="store_true",
         help="Output raw JSON execution result.",
     )
+    parser.add_argument(
+        "--consolidate",
+        choices=["triad", "unified"],
+        default=None,
+        help="Consolidate topology into macro-nodes (triad or unified) before execution.",
+    )
 
     args = parser.parse_args()
 
@@ -60,6 +67,22 @@ def main() -> int:
             runtime_state_dir=runtime_state_dir,
             workspace_dir=workspace_dir,
         )
+
+        if args.consolidate:
+            consolidator = ModelConsolidator()
+            if orchestrator.federated_config:
+                c_model = consolidator.consolidate_federation(
+                    orchestrator.federated_config, mode=args.consolidate
+                )
+            else:
+                c_model = consolidator.consolidate_topology(
+                    orchestrator.config, mode=args.consolidate
+                )
+            orchestrator.config = c_model.to_topology_config(
+                session_id=f"{orchestrator.config.sessionId}-consolidated",
+                max_turns=orchestrator.config.maxTurns,
+            )
+
         result = orchestrator.run_session()
 
         if args.json:

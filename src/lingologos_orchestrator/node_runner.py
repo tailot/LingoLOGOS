@@ -11,6 +11,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional, List
+import httpx
 
 from .schema import Envelope, OrchestratorError, SchemaValidationError
 
@@ -146,3 +147,41 @@ class NodeProcessRunner:
             ) from exc
 
         return Envelope.from_dict(output_dict)
+
+
+class HttpNodeRunner:
+    """Manages execution of a remote HTTP/REST node via POST endpoint."""
+
+    def __init__(
+        self,
+        node_id: str,
+        endpoint_url: str,
+        role: str = "node",
+        auth_method: Optional[str] = None,
+        auth_token: Optional[str] = None,
+        timeout_seconds: float = 30.0,
+    ):
+        self.node_id = node_id
+        self.endpoint_url = endpoint_url
+        self.role = role
+        self.auth_method = auth_method
+        self.auth_token = auth_token
+        self.timeout_seconds = timeout_seconds
+
+    def execute_turn(self, input_envelope: Envelope) -> Envelope:
+        """Sends the input envelope to the remote endpoint and parses the response envelope."""
+        headers = {"Content-Type": "application/json"}
+        if self.auth_method == "bearer_token" and self.auth_token:
+            headers["Authorization"] = f"Bearer {self.auth_token}"
+
+        payload = input_envelope.to_dict()
+        try:
+            with httpx.Client(timeout=self.timeout_seconds) as client:
+                resp = client.post(self.endpoint_url, json=payload, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+                return Envelope.from_dict(data)
+        except Exception as exc:
+            raise OrchestratorError(
+                f"HTTP node '{self.node_id}' failed request to {self.endpoint_url}: {exc}"
+            ) from exc

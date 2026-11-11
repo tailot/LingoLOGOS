@@ -13,6 +13,10 @@ from .schema import (
     SMTConstraints,
     Payload,
     Envelope,
+    NodeSpecs,
+    FederatedNodeConfig,
+    FederatedRoutingRule,
+    FederatedTopologyConfig,
     OrchestratorError,
     SchemaValidationError,
     RoutingError,
@@ -21,10 +25,14 @@ from .schema import (
 )
 from .topology_ctrl import TopologyCtrlRegister
 from .verifier import Z3Verifier, SMTVerificationResult
-from .node_runner import NodeProcessRunner, ProcessExecutionError
+from .node_runner import NodeProcessRunner, HttpNodeRunner, ProcessExecutionError
+from .resolver import NodeResolver, resolve_node_transport
+from .event_bus import EventBus, DynamicNodeSpawner
+from .solver_pool import SMTSolverPool, SolverTask
+from .consolidation import ModelConsolidator, ConsolidatedModel
 from .orchestrator import MultiInstanceOrchestrator, ExecutionResult, TurnRecord
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "TopologyConfig",
@@ -34,6 +42,10 @@ __all__ = [
     "SMTConstraints",
     "Payload",
     "Envelope",
+    "NodeSpecs",
+    "FederatedNodeConfig",
+    "FederatedRoutingRule",
+    "FederatedTopologyConfig",
     "TopologyCtrlRegister",
     "OrchestratorError",
     "SchemaValidationError",
@@ -43,7 +55,16 @@ __all__ = [
     "Z3Verifier",
     "SMTVerificationResult",
     "NodeProcessRunner",
+    "HttpNodeRunner",
     "ProcessExecutionError",
+    "NodeResolver",
+    "resolve_node_transport",
+    "EventBus",
+    "DynamicNodeSpawner",
+    "SMTSolverPool",
+    "SolverTask",
+    "ModelConsolidator",
+    "ConsolidatedModel",
     "MultiInstanceOrchestrator",
     "ExecutionResult",
     "TurnRecord",
