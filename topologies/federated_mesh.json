@@ -1,0 +1,67 @@
+{
+  "federation_name": "lingologos_universal_federation",
+  "version": "2.0.0",
+  "description": "Extended federated topology with unlimited nodes, local and Git transports, and dynamic node resolution",
+  "nodes": [
+    {
+      "node_id": "agente_alfa",
+      "role": "proponent",
+      "transport": "local",
+      "local_cache_path": "datasets/agente_alfa",
+      "specs": {
+        "grammar": "grammar.gf",
+        "ontology": "ontology.smt2",
+        "seed": "seed_payload.json"
+      },
+      "outbound_channels": ["agente_beta", "arbitro_logico"]
+    },
+    {
+      "node_id": "agente_beta",
+      "role": "opponent",
+      "transport": "git",
+      "remote_source": "https://github.com/tailot/LingoLOGOS.git",
+      "branch": "main",
+      "local_cache_path": "cache/nodes/agente_beta",
+      "specs": {
+        "grammar": "datasets/agente_beta/grammar.gf",
+        "ontology": "datasets/agente_beta/ontology.smt2",
+        "seed": "datasets/agente_beta/seed_payload.json"
+      },
+      "outbound_channels": ["agente_alfa", "arbitro_logico"]
+    },
+    {
+      "node_id": "arbitro_logico",
+      "role": "validator",
+      "transport": "local",
+      "local_cache_path": "datasets/arbitro_logico",
+      "specs": {
+        "grammar": "grammar.gf",
+        "ontology": "ontology.smt2",
+        "seed": "seed_payload.json"
+      },
+      "outbound_channels": ["agente_alfa"]
+    }
+  ],
+  "routing_rules": [
+    {
+      "source": "agente_alfa",
+      "target": "agente_beta",
+      "condition": "PROPOSE_TO_GIT_HOSTED_OPPONENT"
+    },
+    {
+      "source": "agente_beta",
+      "target": "arbitro_logico",
+      "condition": "GIT_MODULE_SYNCED_AND_CONTESTED"
+    },
+    {
+      "source": "arbitro_logico",
+      "target": "agente_alfa",
+      "condition": "VALIDATION_VERDICT_RETURNED"
+    },
+    {
+      "source": "agente_alfa",
+      "target": "arbitro_logico",
+      "condition": "REFINED_PROPOSAL_SUBMITTED"
+    }
+  ]
+}

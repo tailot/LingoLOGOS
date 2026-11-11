@@ -9,6 +9,7 @@ Implements the 4-phase lifecycle:
 """
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
@@ -20,14 +21,18 @@ from .schema import (
     VolatileState,
     SMTConstraints,
     Payload,
+    FederatedTopologyConfig,
     OrchestratorError,
     StaticValidationError,
     RoutingError,
     SchemaValidationError,
 )
 from .verifier import Z3Verifier, SMTVerificationResult
-from .node_runner import NodeProcessRunner
+from .node_runner import NodeProcessRunner, HttpNodeRunner
 from .topology_ctrl import TopologyCtrlRegister
+from .resolver import NodeResolver
+from .event_bus import EventBus
+from .solver_pool import SMTSolverPool, SolverTask
 
 
 @dataclass
@@ -93,11 +98,31 @@ class MultiInstanceOrchestrator:
             else self.workspace_dir / "runtime_state"
         )
         self.verifier = Z3Verifier()
-        self.runners: Dict[str, NodeProcessRunner] = {}
+        self.runners: Dict[str, Any] = {}
         self.ontologies: Dict[str, str] = {}
         self.grammars: Dict[str, str] = {}
         self.initial_envelopes: Dict[str, Envelope] = {}
         self.topology_ctrl_by_node: Dict[str, TopologyCtrlRegister] = {}
+        self.event_bus = EventBus()
+        self.solver_pool = SMTSolverPool()
+        self.federated_config: Optional[FederatedTopologyConfig] = None
+        self.resolver = NodeResolver(workspace_dir=self.workspace_dir)
+        # Folder holding ontology.smt2, grammar.gf and seed_payload.json for each node id. It is
+        # filled by Phase 01 from the transport resolver (git cache, local base directory) or from
+        # the representative of a consolidated macro node, and Phase 02 reuses it for the process.
+        self.node_dataset_dirs: Dict[str, Path] = {}
+        self.dataset_representatives: Dict[str, str] = {}
+
+    def set_representative_nodes(self, representatives: Dict[str, str]) -> None:
+        """Binds consolidated macro node ids to the original node whose dataset they run on.
+
+        A consolidated topology names macro nodes that have no folder of their own under the
+        datasets root, so each macro node inherits the specification folder of the member it
+        stands for. Node ids stay the routing identity, the dataset folder becomes the physical one.
+        """
+        for macro_id, physical_id in representatives.items():
+            self.dataset_representatives[macro_id] = physical_id
+            self.node_dataset_dirs.setdefault(macro_id, self.datasets_dir / physical_id)
 
     @classmethod
     def from_config_file(
@@ -107,12 +132,26 @@ class MultiInstanceOrchestrator:
         runtime_state_dir: Optional[Path] = None,
         workspace_dir: Optional[Path] = None,
     ) -> "MultiInstanceOrchestrator":
-        """Builds an orchestrator from a topology JSON file."""
+        """Builds an orchestrator from a topology or federated JSON file."""
         cfg_file = Path(config_path).resolve()
         if not cfg_file.is_file():
             raise FileNotFoundError(f"Topology configuration file not found: {cfg_file}")
         with open(cfg_file, "r", encoding="utf-8") as f:
             data = json.load(f)
+
+        # Detect whether file is a federated mesh topology
+        if "federation_name" in data and "nodes" in data:
+            fed_config = FederatedTopologyConfig.from_dict(data)
+            topology_config = fed_config.to_legacy_topology()
+            orch = cls(
+                config=topology_config,
+                datasets_dir=datasets_dir,
+                runtime_state_dir=runtime_state_dir,
+                workspace_dir=workspace_dir,
+            )
+            orch.federated_config = fed_config
+            return orch
+
         config = TopologyConfig.from_dict(data)
         return cls(
             config=config,
@@ -125,39 +164,68 @@ class MultiInstanceOrchestrator:
     # Phase 01: Static Validation
     # -------------------------------------------------------------------------
     def validate_static(self) -> bool:
-        """Validates schema, filesystem conventions, and SMT syntax for all nodes.
-
-        Filesystem convention:
-          /datasets/{node_id}/
-            ├── ontology.smt2
-            ├── grammar.gf
-            └── seed_payload.json
-        """
-        if not self.datasets_dir.is_dir():
-            raise StaticValidationError(f"Datasets directory not found: {self.datasets_dir}")
+        """Validates schema, filesystem conventions, and SMT syntax for all nodes."""
+        fed_map = {n.node_id: n for n in self.federated_config.nodes} if self.federated_config else {}
+        ontology_tasks: List[SolverTask] = []
 
         for instance in self.config.instances:
             node_id = instance.id
-            node_dir = self.datasets_dir / node_id
+            fed_node = fed_map.get(node_id)
+
+            if fed_node and fed_node.transport == "http":
+                # Remote HTTP endpoint: minimal synthetic seed and axioms
+                self.ontologies[node_id] = ""
+                self.grammars[node_id] = ""
+                seed_envelope = Envelope(
+                    sender=node_id,
+                    recipient=node_id,
+                    turn=0,
+                    volatileState=VolatileState(internalTimeTick=0),
+                    payload=Payload(
+                        naturalLanguage=f"Remote HTTP Node {node_id} initialized",
+                        abstractSyntaxTree=f"RemoteRoot ({node_id})",
+                        smtConstraints=SMTConstraints(declarations=[], assertions=[]),
+                    ),
+                )
+                self.initial_envelopes[node_id] = seed_envelope
+                continue
+
+            representative = self.dataset_representatives.get(node_id)
+
+            if fed_node:
+                # Universal transport resolution: a git source is synchronized into its local cache
+                # here and the specification paths declared in specs are honoured instead of the
+                # plain dataset convention.
+                resolved = self.resolver.resolve(fed_node.to_dict())
+                node_dir = Path(resolved["node_dir"])
+                ontology_file = Path(resolved["ontology_path"])
+                grammar_file = Path(resolved["grammar_path"])
+                seed_file = Path(resolved["seed_path"])
+                self.node_dataset_dirs[node_id] = node_dir
+            else:
+                node_dir = self.node_dataset_dirs.get(
+                    node_id, self.datasets_dir / (representative or node_id)
+                )
+                self.node_dataset_dirs[node_id] = node_dir
+                ontology_file = node_dir / "ontology.smt2"
+                grammar_file = node_dir / "grammar.gf"
+                seed_file = node_dir / "seed_payload.json"
 
             if not node_dir.is_dir():
                 raise StaticValidationError(
                     f"Dataset directory missing for node '{node_id}': expected {node_dir}"
                 )
 
-            ontology_file = node_dir / "ontology.smt2"
             if not ontology_file.is_file():
                 raise StaticValidationError(
                     f"ontology.smt2 missing for node '{node_id}': expected {ontology_file}"
                 )
 
-            grammar_file = node_dir / "grammar.gf"
             if not grammar_file.is_file():
                 raise StaticValidationError(
                     f"grammar.gf missing for node '{node_id}': expected {grammar_file}"
                 )
 
-            seed_file = node_dir / "seed_payload.json"
             if not seed_file.is_file():
                 raise StaticValidationError(
                     f"seed_payload.json missing for node '{node_id}': expected {seed_file}"
@@ -168,10 +236,13 @@ class MultiInstanceOrchestrator:
                 with open(seed_file, "r", encoding="utf-8") as f:
                     seed_json = json.load(f)
                 seed_envelope = Envelope.from_dict(seed_json)
-                if seed_envelope.sender != node_id:
+                if seed_envelope.sender not in (node_id, representative):
                     raise StaticValidationError(
                         f"Seed payload sender '{seed_envelope.sender}' does not match node id '{node_id}'."
                     )
+                # A consolidated macro node runs on the dataset of its representative: the routing
+                # identity stays the macro id, so the seed is relabelled.
+                seed_envelope.sender = node_id
                 self.initial_envelopes[node_id] = seed_envelope
             except Exception as exc:
                 raise StaticValidationError(
@@ -185,15 +256,25 @@ class MultiInstanceOrchestrator:
             with open(grammar_file, "r", encoding="utf-8") as f:
                 self.grammars[node_id] = f.read()
 
-            # Verify ontology SMT syntax using Z3
-            res = self.verifier.verify_constraints(
-                constraints=SMTConstraints(declarations=[], assertions=[]),
-                ontology_smt2=self.ontologies[node_id],
-            )
-            if res.status == "error":
-                raise StaticValidationError(
-                    f"Syntax error in ontology.smt2 for node '{node_id}': {res.error_message}"
+            # Queue the ontology syntax precheck on the centralized solver pool
+            ontology_tasks.append(
+                SolverTask(
+                    task_id=node_id,
+                    constraints=SMTConstraints(declarations=[], assertions=[]),
+                    ontology_smt2=self.ontologies[node_id],
                 )
+            )
+
+        # Phase 01 SMT syntax verification runs concurrently on the pooled Z3 workers: every task
+        # gets its own solver context, so the ontologies of N nodes are parsed in parallel.
+        if ontology_tasks:
+            pool_results = self.solver_pool.verify_batch(ontology_tasks)
+            for task in ontology_tasks:
+                res = pool_results.get(task.task_id)
+                if res is not None and res.status == "error":
+                    raise StaticValidationError(
+                        f"Syntax error in ontology.smt2 for node '{task.task_id}': {res.error_message}"
+                    )
 
         return True
 
@@ -246,20 +327,38 @@ class MultiInstanceOrchestrator:
         self.runtime_state_dir.mkdir(parents=True, exist_ok=True)
         self.negotiate_topology()
 
+        fed_map = {n.node_id: n for n in self.federated_config.nodes} if self.federated_config else {}
+
         for instance in self.config.instances:
-            runner = NodeProcessRunner(
-                node_id=instance.id,
-                executable=instance.executable,
-                role=instance.role,
-                datasets_dir=self.datasets_dir,
-                workspace_dir=self.workspace_dir,
-            )
-            reg = self.topology_ctrl_by_node.get(instance.id)
-            if reg:
-                runner.hardware_node_id = reg.node_id
-                runner.probe_peers = reg.total_nodes - 1 if reg.total_nodes > 1 else 0
-                runner.dataset_id = reg.dataset_id
-                runner.topology_ctrl_reg = f"0x{reg.pack():08X}"
+            fed_node = fed_map.get(instance.id)
+            if fed_node and fed_node.transport == "http" and fed_node.endpoint_url:
+                # The bearer token is never stored in the topology file: the node declares the name
+                # of the environment variable that carries it.
+                auth_token = None
+                if fed_node.auth_method == "bearer_token" and fed_node.auth_token_env:
+                    auth_token = os.environ.get(fed_node.auth_token_env)
+                runner = HttpNodeRunner(
+                    node_id=instance.id,
+                    endpoint_url=fed_node.endpoint_url,
+                    role=instance.role,
+                    auth_method=fed_node.auth_method,
+                    auth_token=auth_token,
+                )
+            else:
+                runner = NodeProcessRunner(
+                    node_id=instance.id,
+                    executable=instance.executable,
+                    role=instance.role,
+                    datasets_dir=self.datasets_dir,
+                    workspace_dir=self.workspace_dir,
+                    node_dir=self.node_dataset_dirs.get(instance.id),
+                )
+                reg = self.topology_ctrl_by_node.get(instance.id)
+                if reg:
+                    runner.hardware_node_id = reg.node_id
+                    runner.probe_peers = reg.total_nodes - 1 if reg.total_nodes > 1 else 0
+                    runner.dataset_id = reg.dataset_id
+                    runner.topology_ctrl_reg = f"0x{reg.pack():08X}"
             self.runners[instance.id] = runner
 
     # -------------------------------------------------------------------------
@@ -267,6 +366,13 @@ class MultiInstanceOrchestrator:
     # -------------------------------------------------------------------------
     def run_session(self) -> ExecutionResult:
         """Executes the complete session lifecycle across all turns."""
+        try:
+            return self._execute_session()
+        finally:
+            # Release the Z3 worker threads of the centralized solver pool at session end.
+            self.solver_pool.shutdown(wait=True)
+
+    def _execute_session(self) -> ExecutionResult:
         # Phase 01: Static Validation
         self.validate_static()
 
@@ -352,6 +458,12 @@ class MultiInstanceOrchestrator:
             )
             records.append(record)
             current_payload_by_node[sender_id] = output_envelope
+
+            # Publish turn envelope to event bus for streaming subscribers
+            self.event_bus.publish(
+                topic=f"channel/{sender_id}/{actual_recipient}",
+                envelope=output_envelope,
+            )
 
             # Phase 04: Termination Conditions Check
             cond = self.config.terminationCondition

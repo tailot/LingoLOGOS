@@ -39,6 +39,15 @@ class Z3Verifier:
     CONST_PATTERN = re.compile(r"^\s*\(\s*declare-const\s+([A-Za-z0-9_!@$%^&*+=<>.?-]+)", re.IGNORECASE)
     FUN_PATTERN = re.compile(r"^\s*\(\s*declare-fun\s+([A-Za-z0-9_!@$%^&*+=<>.?-]+)", re.IGNORECASE)
 
+    def __init__(self, smt_context: Optional["z3.Context"] = None):
+        """Creates a verifier, optionally bound to a dedicated Z3 context.
+
+        The implicit Z3 main context is shared process wide and is not safe to parse into from
+        several threads at the same time. A pooled verification worker therefore gets its own
+        context, which keeps concurrent ontology checks of different nodes fully isolated.
+        """
+        self.smt_context = smt_context
+
     @classmethod
     def extract_declared_identifiers(cls, smt_text: str) -> Set[str]:
         """Extracts declared sort, constant, and function names from SMT-LIB 2 text."""
@@ -114,7 +123,7 @@ class Z3Verifier:
         ontology_smt2: Optional[str] = None,
     ) -> SMTVerificationResult:
         """Verifies SMT constraints combined with optional ontology declarations."""
-        solver = z3.Solver()
+        solver = z3.Solver(ctx=self.smt_context) if self.smt_context is not None else z3.Solver()
         smt_segments: List[str] = []
 
         ontology_symbols: Set[str] = set()

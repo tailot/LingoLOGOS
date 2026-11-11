@@ -11,6 +11,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional, List
+import httpx
 
 from .schema import Envelope, OrchestratorError, SchemaValidationError
 
@@ -39,11 +40,16 @@ class NodeProcessRunner:
         datasets_dir: Path,
         workspace_dir: Optional[Path] = None,
         timeout_seconds: float = 30.0,
+        node_dir: Optional[Path] = None,
     ):
         self.node_id = node_id
         self.executable_spec = executable
         self.role = role
         self.datasets_dir = Path(datasets_dir).resolve()
+        # node_dir overrides the datasets_dir/node_id convention: a federated node reads its
+        # specification files from a git cache or a macro node runs on the dataset of the node it
+        # stands for, so the folder holding ontology.smt2 is not always the one named after the id.
+        self.node_dir = Path(node_dir).resolve() if node_dir else None
         self.workspace_dir = Path(workspace_dir).resolve() if workspace_dir else Path.cwd()
         self.timeout_seconds = timeout_seconds
         self.command_path = self._resolve_executable(executable)
@@ -89,7 +95,7 @@ class NodeProcessRunner:
 
     def execute_turn(self, input_envelope: Envelope) -> Envelope:
         """Executes one turn on the isolated node process passing envelope via stdin."""
-        node_dataset_dir = self.datasets_dir / self.node_id
+        node_dataset_dir = self.node_dir if self.node_dir is not None else self.datasets_dir / self.node_id
 
         cmd = list(self.command_path)
         cmd.extend([
@@ -146,3 +152,41 @@ class NodeProcessRunner:
             ) from exc
 
         return Envelope.from_dict(output_dict)
+
+
+class HttpNodeRunner:
+    """Manages execution of a remote HTTP/REST node via POST endpoint."""
+
+    def __init__(
+        self,
+        node_id: str,
+        endpoint_url: str,
+        role: str = "node",
+        auth_method: Optional[str] = None,
+        auth_token: Optional[str] = None,
+        timeout_seconds: float = 30.0,
+    ):
+        self.node_id = node_id
+        self.endpoint_url = endpoint_url
+        self.role = role
+        self.auth_method = auth_method
+        self.auth_token = auth_token
+        self.timeout_seconds = timeout_seconds
+
+    def execute_turn(self, input_envelope: Envelope) -> Envelope:
+        """Sends the input envelope to the remote endpoint and parses the response envelope."""
+        headers = {"Content-Type": "application/json"}
+        if self.auth_method == "bearer_token" and self.auth_token:
+            headers["Authorization"] = f"Bearer {self.auth_token}"
+
+        payload = input_envelope.to_dict()
+        try:
+            with httpx.Client(timeout=self.timeout_seconds) as client:
+                resp = client.post(self.endpoint_url, json=payload, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+                return Envelope.from_dict(data)
+        except Exception as exc:
+            raise OrchestratorError(
+                f"HTTP node '{self.node_id}' failed request to {self.endpoint_url}: {exc}"
+            ) from exc

@@ -9,6 +9,10 @@ dist/
 # Volatile orchestrator runtime state directory
 runtime_state/
 
+# Local specification cache of federated nodes: git sources are shallow cloned into
+# cache/nodes/<node_id> by the transport resolver, so the folder is regenerated on demand.
+cache/
+
 # Dataset companion folder: corpus and tools are versioned here,
 # training outputs stay local.
 datasets/multilingual/checkpoints/
