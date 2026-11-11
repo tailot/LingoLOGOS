@@ -1,67 +1,67 @@
 {
   "federation_name": "lingologos_universal_federation",
   "version": "2.0.0",
-  "description": "Topologia federata estesa con supporto a nodi illimitati, Git, HTTP e resolver dinamici",
+  "description": "Extended federated topology with unlimited nodes, local and Git transports, and dynamic node resolution",
   "nodes": [
     {
-      "node_id": "local_core_node",
-      "role": "Local Engine & State Manager",
+      "node_id": "agente_alfa",
+      "role": "proponent",
       "transport": "local",
+      "local_cache_path": "datasets/agente_alfa",
       "specs": {
-        "grammar": "grammars/grammar.gf",
-        "ontology": "ontologies/ontology.smt2",
-        "seed": "seeds/seed_payload.json"
+        "grammar": "grammar.gf",
+        "ontology": "ontology.smt2",
+        "seed": "seed_payload.json"
       },
-      "outbound_channels": ["git_repo_node", "http_api_node"]
+      "outbound_channels": ["agente_beta", "arbitro_logico"]
     },
     {
-      "node_id": "git_repo_node",
-      "role": "External Git Repository Source",
+      "node_id": "agente_beta",
+      "role": "opponent",
       "transport": "git",
-      "remote_source": "https://github.com/detached-org/lingologos-modules.git",
+      "remote_source": "https://github.com/tailot/LingoLOGOS.git",
       "branch": "main",
-      "local_cache_path": "cache/nodes/git_repo_node",
+      "local_cache_path": "cache/nodes/agente_beta",
       "specs": {
-        "grammar": "modules/grammar.gf",
-        "ontology": "modules/ontology.smt2",
-        "seed": "modules/seed_payload.json"
+        "grammar": "datasets/agente_beta/grammar.gf",
+        "ontology": "datasets/agente_beta/ontology.smt2",
+        "seed": "datasets/agente_beta/seed_payload.json"
       },
-      "outbound_channels": ["local_core_node"]
+      "outbound_channels": ["agente_alfa", "arbitro_logico"]
     },
     {
-      "node_id": "http_api_node",
-      "role": "Remote HTTP Endpoint / Microservice",
-      "transport": "http",
-      "endpoint_url": "https://api.lingologos-inference.net/v1/evaluate",
-      "auth_method": "bearer_token",
+      "node_id": "arbitro_logico",
+      "role": "validator",
+      "transport": "local",
+      "local_cache_path": "datasets/arbitro_logico",
       "specs": {
-        "grammar": "remote_specs/grammar_ref.gf",
-        "ontology": "remote_specs/ontology_ref.smt2",
-        "seed": "remote_specs/payload.json"
+        "grammar": "grammar.gf",
+        "ontology": "ontology.smt2",
+        "seed": "seed_payload.json"
       },
-      "outbound_channels": ["local_core_node"]
+      "outbound_channels": ["agente_alfa"]
     }
   ],
   "routing_rules": [
     {
-      "source": "local_core_node",
-      "target": "git_repo_node",
-      "condition": "FETCH_EXTERNAL_GRAMMAR_MODULES"
+      "source": "agente_alfa",
+      "target": "agente_beta",
+      "condition": "PROPOSE_TO_GIT_HOSTED_OPPONENT"
     },
     {
-      "source": "git_repo_node",
-      "target": "local_core_node",
-      "condition": "MODULES_CLONED_AND_SYNCED"
+      "source": "agente_beta",
+      "target": "arbitro_logico",
+      "condition": "GIT_MODULE_SYNCED_AND_CONTESTED"
     },
     {
-      "source": "local_core_node",
-      "target": "http_api_node",
-      "condition": "OFFLOAD_VERIFICATION_TO_HTTP_ENDPOINT"
+      "source": "arbitro_logico",
+      "target": "agente_alfa",
+      "condition": "VALIDATION_VERDICT_RETURNED"
     },
     {
-      "source": "http_api_node",
-      "target": "local_core_node",
-      "condition": "HTTP_EVALUATION_COMPLETED"
+      "source": "agente_alfa",
+      "target": "arbitro_logico",
+      "condition": "REFINED_PROPOSAL_SUBMITTED"
     }
   ]
 }

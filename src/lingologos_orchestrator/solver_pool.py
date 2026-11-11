@@ -10,6 +10,8 @@ from typing import List, Dict, Any, Optional
 import concurrent.futures
 from dataclasses import dataclass
 
+import z3
+
 from .schema import SMTConstraints
 from .verifier import Z3Verifier, SMTVerificationResult
 
@@ -31,8 +33,12 @@ class SMTSolverPool:
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
 
     def verify_single(self, task: SolverTask) -> SMTVerificationResult:
-        """Executes a single SMT verification task."""
-        verifier = Z3Verifier()
+        """Executes a single SMT verification task inside a dedicated Z3 context.
+
+        Each worker thread parses the ontology of one node into its own solver context, so the
+        verifications of concurrent tasks never touch the shared Z3 main context.
+        """
+        verifier = Z3Verifier(smt_context=z3.Context())
         return verifier.verify_constraints(
             constraints=task.constraints,
             ontology_smt2=task.ontology_smt2,
@@ -61,3 +67,8 @@ class SMTSolverPool:
     def shutdown(self, wait: bool = True) -> None:
         """Shuts down the thread pool executor."""
         self.executor.shutdown(wait=wait)
+
+    def is_shutdown(self) -> bool:
+        """Reports whether the executor was released and no longer accepts verification tasks."""
+        return bool(getattr(self.executor, "_shutdown", False))
+

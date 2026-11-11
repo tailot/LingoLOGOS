@@ -444,7 +444,11 @@ separates executed from declared claim by claim.
   - `pyyaml >= 6.0`
   - `numpy >= 1.24.0`
   - `safetensors >= 0.4.0` - release format of the pure-model weights, section 1.8
+  - `httpx >= 0.24.0` - client of the federated HTTP transport of section 13.5, used only when a node
+    declares `"transport": "http"`
   - `pytest >= 8.0.0`
+- The federated Git transport of section 13.5 shells out to `git`, an external program that must be on
+  the `PATH` for a node declaring `"transport": "git"`; no other Python package is involved.
 - Optional, used only when publishing: `huggingface_hub >= 0.23.0`, installed with
   `pip install -e ".[publish]"`. `datasets/multilingual/tools/publish_to_hub.py` imports it inside the upload step and
   nowhere else, so building a release folder needs no Hub package and no network access.
@@ -882,26 +886,71 @@ The orchestrator evaluates termination condition $\mathcal{C}$ at each turn $k$:
 
 ### 13.5 Federated Infrastructure and Universal Transport Resolver
 
-The orchestrator supports universal federation across heterogeneous execution environments:
+The orchestrator supports universal federation across heterogeneous execution environments. A
+federated node adds four fields to the topology entry: `transport`, `remote_source`, `branch`,
+`local_cache_path`, plus the `specs` folder holding `grammar.gf`, `ontology.smt2`, and
+`seed_payload.json`.
 
-1. **Local Transport (`local`)**: Resolves directly to the local filesystem workspace.
-2. **Git Transport (`git`)**: Synchronizes remote modules dynamically into a local cache directory using shallow clones (`depth 1`) and pull operations.
-3. **HTTP Transport (`http`)**: Offloads reasoning, parsing, or SMT verification to remote stateless HTTP/REST endpoints via POST requests with authorization headers.
+1. **Local Transport (`local`)**: `local_cache_path` names the folder of the specification, resolved
+   against `--workspace`, so the same configuration is valid from any working directory. Without the
+   field the node falls back to `datasets/<node_id>/`.
+2. **Git Transport (`git`)**: the cache folder, again anchored on the workspace and by convention
+   `cache/nodes/<node_id>` (kept out of the index by `.gitignore`), is synchronized by Phase 01: a
+   shallow clone `git clone --branch <branch> --depth 1 <remote_source> <cache>` on first use, an
+   incremental `git -C <cache> pull origin <branch>` afterwards. The specification is then read from
+   `<cache>/<specs.ontology>`. Because the synchronization runs inside `validate_static`, a node
+   whose remote cannot be reached stops the session before a single turn is dispatched.
+3. **HTTP Transport (`http`)**: the node is executed by `HttpNodeRunner`, which POSTs the input
+   envelope to `endpoint_url` and parses the envelope of the response. When `auth_method` is
+   `bearer_token` the request carries `Authorization: Bearer <token>`, and the token is read at
+   Phase 02 from the environment variable named by `auth_token_env`; the token itself never appears
+   in a topology file. A failed request raises `OrchestratorError` and aborts the session.
 
-The `NodeResolver` unifies specification access for grammars (`grammar.gf`), ontologies (`ontology.smt2`), and seed payloads (`seed_payload.json`).
+`NodeResolver.resolve` turns those fields into absolute paths: `grammar_path`, `ontology_path`,
+`seed_path`, and `node_dir`, the folder of the ontology that Phase 02 passes to the node process as
+`--node-dir`. The folder is configurable, the file names are not, because the node CLI contract of
+section 13.3 requires the three specification files to sit in one directory. The seed payload of a
+federated node must declare `sender` equal to the node id; a consolidated macro node is the one
+exception, since the seed of its representative is relabelled to the macro id.
 
 ### 13.6 Infinite Node Scalability ($N \to \infty$)
 
 To scale beyond static $N$-node configurations:
-- **Event-Driven Message Bus (`EventBus`)**: Enables topic-based asynchronous publish and subscribe decoupling direct node-to-node channels.
-- **Dynamic Node Spawner (`DynamicNodeSpawner`)**: Generates sub-agent instances on demand at runtime based on task complexity.
-- **Centralized SMT Solver Pool (`SMTSolverPool`)**: Coordinates multi-threaded worker pools executing concurrent Z3 constraint evaluations.
+- **Event-Driven Message Bus (`EventBus`)**: the turn loop publishes the output envelope of every
+  executed turn on the topic `channel/<sender>/<recipient>`, so a streaming subscriber observes the
+  dialogue without being a routing endpoint. A subscriber on `*` receives every envelope, and
+  `get_history()` returns exactly one envelope per executed turn.
+- **Dynamic Node Spawner (`DynamicNodeSpawner`)**: `spawn_sub_node` emits the metadata of a
+  sub-agent (generated node id, role, transport, parent id, task, and specification folder). The
+  supervisor adds that entry to a federated configuration and starts a session over it; the
+  orchestrator does not spawn a node in the middle of a running session.
+- **Centralized SMT Solver Pool (`SMTSolverPool`)**: Phase 01 queues one `SolverTask` per node
+  ontology and dispatches them through `verify_batch`, so the ontology precheck of $N$ nodes runs on
+  the pooled workers instead of sequentially. Each worker binds its verifier to a dedicated
+  `z3.Context()`: the implicit Z3 main context is shared process wide and is not safe to parse into
+  from several threads at once, which the isolation avoids. `run_session` shuts the pool down in a
+  `finally` block, so the worker threads never outlive the session.
 
 ### 13.7 Model Consolidation
 
-The `ModelConsolidator` contracts complex $N$-node federated or multi-agent topologies:
-- **Triad Consolidation**: Collapses $N$ nodes into three functional macro-nodes (`macro_proponent`, `macro_opponent`, `macro_validator`) with consolidated edge projections.
-- **Unified Consolidation**: Collapses the entire topology into a single unified local execution macro-engine (`unified_macro_engine`).
+The `ModelConsolidator` contracts complex $N$-node federated or multi-agent topologies. Every node is
+mapped by the role classifier $\mu$ to a functional category, searching the role text for the
+validator, opponent, and proponent keyword families and defaulting to proponent:
+$\mu(v) \in \{\text{proponent}, \text{opponent}, \text{validator}\}$.
+
+- **Triad Consolidation**: collapses $N$ nodes into the macro-nodes
+  `macro_proponent`, `macro_opponent`, and `macro_validator`, with the projected edge set
+  $E_M = \{(\mu(u), \mu(v)) : (u, v) \in E,\ \mu(u) \neq \mu(v))\}$. A category with no member is
+  dropped, which degenerates the contraction to a dyad, and when the projection leaves no edge at all
+  the surviving macro-nodes are wired into a cycle so the session still has a dialogue to run. Each
+  macro node records a representative $r(m)$, the first physical node of its category, and runs on
+  the specification folder of that node, so `--consolidate triad` needs no dataset of its own and
+  stays end to end executable on any topology whose nodes have datasets.
+- **Unified Consolidation**: collapses the entire topology into a single unified local execution
+  macro-engine (`unified_macro_engine`). A single engine has no peer to exchange a turn with, so the
+  projected routing matrix is empty and a session over it terminates immediately with
+  `EMPTY_ROUTING_MATRIX`. Unified mode is the contraction used to inspect the compressed model, while
+  triad mode is the consolidation that actually runs a dialogue.
 
 ---
 

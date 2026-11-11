@@ -346,7 +346,11 @@ $$A \to a:\ \delta = e(a),\ m = e(a) \qquad A \to B\,C:\ \delta = \delta_B + \de
 - PyYAML (`pyyaml`)
 - NumPy (`numpy`)
 - Safetensors (`safetensors`), the release format of the pure-model weights
+- HTTP client for federated HTTP nodes (`httpx`)
 - pytest (`pytest`)
+
+The federated Git transport of section 11 also needs `git` as an external program on the `PATH`; the
+orchestrator calls it to shallow clone or pull the specification cache of a Git node.
 
 The ASIC track of section 12 needs nothing beyond CPython and pytest for generation and gates. Verilator 5.006 or later, Icarus Verilog 11 or later, Yosys 0.38 or later and OpenLane 1 or 2 with the SkyWater `sky130A` PDK are external programs, not Python packages, and none of them is committed to this tree. Verilator 5.054 ran from the image `verilator/verilator:latest`, which is how the lint and both simulation paths of section 12.3 were executed; OpenLane 2.3.10 ran the full place and route in WSL Ubuntu on 2026-11-09, with the sky130A PDK downloaded by volare and the tools taken from the image `ghcr.io/efabless/openlane2:2.3.10`, and Yosys ran inside that flow as its synthesis step; Icarus Verilog has never run here. `asic_chip/doc/build_instructions.md` says what to install and how to run the same commands in that image, and `asic_chip/doc/verification_report.md` says what that leaves unverified.
 
@@ -806,10 +810,10 @@ Communication between nodes uses a structured JSON envelope:
 ```
 
 ### Lifecycle Phases
-- **Phase 01: Static Validation**: Validates `topology.json` schema, checks presence of `datasets/{node_id}/` files (`ontology.smt2`, `grammar.gf`, `seed_payload.json`), and checks SMT syntax using Z3.
-- **Phase 02: Process Initialization**: Maps node IDs and prepares isolated subprocess runners via `lllayer`.
-- **Phase 03: Turn Loop ($k = 1 \dots \text{maxTurns}$)**: Dispatches messages across authorized edges $(u, v) \in E$, executes node $u$ via subprocess stdin/stdout, and verifies algebraic constraints against the node ontology using Z3.
-- **Phase 04: Termination**: Concludes session upon reaching logical convergence (SAT convergence), tripping an UNSAT breaker, or reaching `maxTurns`.
+- **Phase 01: Static Validation**: Validates `topology.json` schema, resolves the transport of every federated node (a Git source is shallow cloned or pulled into `cache/nodes/<node_id>`, a local node reads `local_cache_path`), checks presence of the specification files (`ontology.smt2`, `grammar.gf`, `seed_payload.json`), and checks SMT syntax on the pooled Z3 workers.
+- **Phase 02: Process Initialization**: Maps node IDs and prepares isolated subprocess runners via `lllayer`, or HTTP runners for remote nodes.
+- **Phase 03: Turn Loop ($k = 1 \dots \text{maxTurns}$)**: Dispatches messages across authorized edges $(u, v) \in E$, executes node $u$ via subprocess stdin/stdout, publishes the resulting envelope on the event bus topic `channel/<sender>/<recipient>`, and verifies algebraic constraints against the node ontology using Z3.
+- **Phase 04: Termination**: Concludes session upon reaching logical convergence (SAT convergence), tripping an UNSAT breaker, or reaching `maxTurns`, then releases the Z3 worker pool.
 
 ### CLI Usage
 Run the orchestrator:
@@ -821,11 +825,39 @@ Run with federated mesh topology:
 ```bash
 lingologos-orchestrator --config topologies/federated_mesh.json --datasets datasets/
 ```
+The shipped `topologies/federated_mesh.json` mixes transports over the datasets of this repository:
+`agente_alfa` and `arbitro_logico` are local nodes reading `datasets/<node_id>/`, and `agente_beta`
+is a Git node, so the first run clones the project repository into the ignored folder
+`cache/nodes/agente_beta` and reads the specification from `datasets/agente_beta/` inside that clone.
+A second run only pulls the cache. Because that node needs the network the first time, run the
+plain command above to reproduce the same session without any remote fetch.
+
+Add a remote HTTP node with bearer authentication by declaring the environment variable that holds
+the token; the token itself never enters the topology file:
+```json
+{
+  "node_id": "http_api_node",
+  "role": "validator",
+  "transport": "http",
+  "endpoint_url": "https://api.example.net/v1/evaluate",
+  "auth_method": "bearer_token",
+  "auth_token_env": "LINGOLOGOS_HTTP_TOKEN",
+  "outbound_channels": ["agente_alfa"]
+}
+```
+```bash
+export LINGOLOGOS_HTTP_TOKEN="<token issued by the endpoint>"
+```
 
 Run with topology consolidation into a verification triad:
 ```bash
 lingologos-orchestrator --config topologies/federated_mesh.json --datasets datasets/ --consolidate triad
 ```
+Triad consolidation contracts the graph into `macro_proponent`, `macro_opponent`, and
+`macro_validator`, and each macro node runs on the specification folder of the physical node it
+represents, so the command needs no extra dataset. `--consolidate unified` collapses everything into
+a single macro engine; with no peer to talk to the session reports `EMPTY_ROUTING_MATRIX`, which
+makes unified mode the graph contraction used for analysis rather than a runnable dialogue graph.
 
 Execute an isolated node CLI turn directly:
 ```bash

@@ -376,6 +376,7 @@ class FederatedNodeConfig:
     local_cache_path: Optional[str] = None
     endpoint_url: Optional[str] = None
     auth_method: Optional[str] = None
+    auth_token_env: Optional[str] = None
     outbound_channels: List[str] = field(default_factory=list)
 
     @classmethod
@@ -402,10 +403,16 @@ class FederatedNodeConfig:
         local_cache_path = data.get("local_cache_path")
         endpoint_url = data.get("endpoint_url")
         auth_method = data.get("auth_method")
+        auth_token_env = data.get("auth_token_env")
         outbound = data.get("outbound_channels", [])
 
         if not isinstance(outbound, list) or not all(isinstance(x, str) for x in outbound):
             raise SchemaValidationError("outbound_channels must be a list of strings.")
+
+        if auth_token_env is not None and (not isinstance(auth_token_env, str) or not auth_token_env.strip()):
+            raise SchemaValidationError("auth_token_env must be a non-empty environment variable name.")
+        if auth_token_env is not None and auth_method != "bearer_token":
+            raise SchemaValidationError("auth_token_env requires auth_method set to bearer_token.")
 
         if transport == "git":
             if not remote_source or not isinstance(remote_source, str):
@@ -424,6 +431,7 @@ class FederatedNodeConfig:
             local_cache_path=local_cache_path,
             endpoint_url=endpoint_url,
             auth_method=auth_method,
+            auth_token_env=auth_token_env,
             outbound_channels=list(outbound),
         )
 
@@ -446,6 +454,8 @@ class FederatedNodeConfig:
             res["endpoint_url"] = self.endpoint_url
         if self.auth_method is not None:
             res["auth_method"] = self.auth_method
+        if self.auth_token_env is not None:
+            res["auth_token_env"] = self.auth_token_env
         return res
 
 

@@ -29,6 +29,14 @@ class ConsolidatedModel:
     macro_nodes: List[Dict[str, Any]]
     macro_routing: List[Dict[str, Any]]
 
+    def representatives(self) -> Dict[str, str]:
+        """Maps each macro node id to the original node whose dataset it executes on."""
+        return {
+            m["id"]: m["representative"]
+            for m in self.macro_nodes
+            if m.get("representative")
+        }
+
     def to_topology_config(self, session_id: str, max_turns: int = 15) -> TopologyConfig:
         """Converts consolidated model to a runnable TopologyConfig."""
         instances = [
@@ -86,19 +94,27 @@ class ModelConsolidator:
             mapping[nid] = target_macro
             triad_nodes[target_macro]["members"].append(nid)
 
+        # A macro node with no member has no dataset and no role to play, so it is dropped and the
+        # contraction degenerates to a dyad. Each surviving macro node runs on the dataset of its
+        # first member, which is the representative recorded below.
+        macro_nodes = [m for m in triad_nodes.values() if m["members"]]
+        for m in macro_nodes:
+            m["representative"] = m["members"][0]
+        surviving_ids = [m["id"] for m in macro_nodes]
+
         # Consolidate directed edges
-        macro_edges: Dict[str, Set[str]] = {m: set() for m in triad_nodes}
+        macro_edges: Dict[str, Set[str]] = {m: set() for m in surviving_ids}
         for src, dst in edges:
             m_src = mapping.get(src)
             m_dst = mapping.get(dst)
-            if m_src and m_dst and m_src != m_dst:
+            if m_src in macro_edges and m_dst in macro_edges and m_src != m_dst:
                 macro_edges[m_src].add(m_dst)
 
-        # If no inter-macro edges existed, ensure standard cyclical verification triad
-        if not any(macro_edges.values()):
-            macro_edges["macro_proponent"].add("macro_opponent")
-            macro_edges["macro_opponent"].add("macro_validator")
-            macro_edges["macro_validator"].add("macro_proponent")
+        # If no inter-macro edges existed, ensure the standard cyclical verification pattern
+        if surviving_ids and not any(macro_edges.values()):
+            if len(surviving_ids) > 1:
+                for idx, src in enumerate(surviving_ids):
+                    macro_edges[src].add(surviving_ids[(idx + 1) % len(surviving_ids)])
 
         macro_routing = [
             {"from": src, "to": sorted(list(targets))}
@@ -109,7 +125,7 @@ class ModelConsolidator:
         return ConsolidatedModel(
             mode="triad",
             node_mapping=mapping,
-            macro_nodes=list(triad_nodes.values()),
+            macro_nodes=macro_nodes,
             macro_routing=macro_routing,
         )
 
@@ -130,13 +146,17 @@ class ModelConsolidator:
             "role": "unified_engine",
             "executable": "lllayer",
             "members": all_ids,
+            "representative": all_ids[0] if all_ids else None,
         }
 
+        # A single engine has no peer to talk to: the routing matrix is left empty on purpose, and a
+        # session over it ends with EMPTY_ROUTING_MATRIX. Unified mode is therefore the model
+        # contraction used for offline analysis, while triad mode is the runnable consolidation.
         return ConsolidatedModel(
             mode="unified",
             node_mapping=mapping,
             macro_nodes=[macro_node],
-            macro_routing=[{"from": "unified_macro_engine", "to": ["unified_macro_engine"]}],
+            macro_routing=[],
         )
 
     def consolidate_federation(

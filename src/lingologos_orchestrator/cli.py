@@ -82,6 +82,9 @@ def main() -> int:
                 session_id=f"{orchestrator.config.sessionId}-consolidated",
                 max_turns=orchestrator.config.maxTurns,
             )
+            # A macro node has no folder of its own under the datasets root: bind it to the
+            # specification folder of the physical node it represents before running the session.
+            orchestrator.set_representative_nodes(c_model.representatives())
 
         result = orchestrator.run_session()
 

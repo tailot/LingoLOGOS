@@ -40,11 +40,16 @@ class NodeProcessRunner:
         datasets_dir: Path,
         workspace_dir: Optional[Path] = None,
         timeout_seconds: float = 30.0,
+        node_dir: Optional[Path] = None,
     ):
         self.node_id = node_id
         self.executable_spec = executable
         self.role = role
         self.datasets_dir = Path(datasets_dir).resolve()
+        # node_dir overrides the datasets_dir/node_id convention: a federated node reads its
+        # specification files from a git cache or a macro node runs on the dataset of the node it
+        # stands for, so the folder holding ontology.smt2 is not always the one named after the id.
+        self.node_dir = Path(node_dir).resolve() if node_dir else None
         self.workspace_dir = Path(workspace_dir).resolve() if workspace_dir else Path.cwd()
         self.timeout_seconds = timeout_seconds
         self.command_path = self._resolve_executable(executable)
@@ -90,7 +95,7 @@ class NodeProcessRunner:
 
     def execute_turn(self, input_envelope: Envelope) -> Envelope:
         """Executes one turn on the isolated node process passing envelope via stdin."""
-        node_dataset_dir = self.datasets_dir / self.node_id
+        node_dataset_dir = self.node_dir if self.node_dir is not None else self.datasets_dir / self.node_id
 
         cmd = list(self.command_path)
         cmd.extend([
