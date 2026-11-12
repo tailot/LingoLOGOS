@@ -495,7 +495,7 @@ pytest -v tests/
 The suite also carries the gates of the ASIC track described in section 12: `tests/test_asic_compiler.py`
 recomputes every numeric claim in `asic_chip/` from the committed files and
 `tests/test_asic_core_firmware.py` emulates the core firmware, and `tests/test_grammar_artifacts.py` re-runs the synthesis and compares the committed formal outputs, so 448 tests pass in this
-checkout with no HDL tool on the host (468 collected, one skipped for a missing optional artifact). The ASIC steps that do need an external tool are
+checkout with no HDL tool on the host (473 collected, one skipped for a missing optional artifact). The ASIC steps that do need an external tool are
 documented in `asic_chip/doc/build_instructions.md`: Verilator 5.054 linted and simulated the
 design inside the image `verilator/verilator:latest`, OpenLane 2.3.10 with the sky130A PDK ran
 two complete place and routes in WSL Ubuntu, and Icarus Verilog has never run here. The
@@ -802,7 +802,7 @@ refuses to start a place and route until `--check` passes, which is what keeps a
 
 ### 12.3 Verification status, executed against not run
 
-`python -m pytest -v tests/` in this checkout: **467 passed, 1 skipped**, zero failures, zero errors; the synthesis that `tests/test_grammar_artifacts.py` performs once per session accounts for about 16 s of that wall time.
+`python -m pytest -v tests/` in this checkout: **472 passed, 1 skipped**, zero failures, zero errors; the synthesis that `tests/test_grammar_artifacts.py` performs once per session accounts for about 16 s of that wall time.
 Twenty six of those tests target the ASIC tree: twenty in `tests/test_asic_compiler.py`
 and six in `tests/test_asic_core_firmware.py`, plus the helper model in
 `tests/asic_reference_model.py` that recomputes the dot product, the GF field, the clause
@@ -1019,7 +1019,9 @@ model:   datasets/multilingual/checkpoints/hub model.safetensors vocab=3921 oper
 
 With no `--grammar` the order is: the package named by `--model-package`, a package inside
 `--node-dir`, `--topology-config`, then the generic alphabet. `--grammar generic|topology|dataset`
-forces one and refuses instead of falling back. The bracket algebra automaton of
+forces one and refuses instead of falling back. `--node-dir` is mandatory in turn mode, which reads
+`seed_payload.json` from it, and optional in query mode: when the grammar source is a package or a
+topology file the node folder plays no part, and only `--node-id` is needed to sign the answer. The bracket algebra automaton of
 `src/neuro_symbolic/masking.py` feeds its admissible token ids into the same in-place masking kernel
 of `--constrained-decoding`, so an illegal skeleton or an undeclared route cannot be sampled at all:
 a route the routing matrix does not declare never enters the mask. After decoding the tree is checked

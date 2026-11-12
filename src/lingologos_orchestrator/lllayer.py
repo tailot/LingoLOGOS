@@ -203,7 +203,7 @@ def run_text_query(args, node_dir: Path, topology_ctrl: TopologyCtrlRegister) ->
         if not data_path.is_file():
             print("lllayer: text file not found: " + str(data_path), file=sys.stderr)
             return 2
-        query_text = data_path.read_text(encoding="utf-8")
+        query_text = data_path.read_text(encoding="utf-8-sig")
 
     incoming_envelope: Optional[Envelope] = None
     if not sys.stdin.isatty():
@@ -254,7 +254,7 @@ def main() -> int:
     )
     parser.add_argument("--node-id", required=True, help="Arbitrary node identifier.")
     parser.add_argument("--role", default="node", help="Role of the node (e.g. proponent, opponent, validator).")
-    parser.add_argument("--node-dir", required=True, help="Path to the node dataset directory.")
+    parser.add_argument("--node-dir", default=None, help="Path to the node dataset directory (required by turn mode).")
     parser.add_argument("--hardware-node-id", type=int, default=0, help="Physical node ID from strapping pins (0..15).")
     parser.add_argument("--probe-peers", type=int, default=0, help="Number of external peers discovered on board.")
     parser.add_argument("--dataset-id", type=int, default=0, help="Logical dataset ID assigned to this node.")
@@ -279,7 +279,11 @@ def main() -> int:
 
     node_id = args.node_id
     role = args.role
-    node_dir = Path(args.node_dir).resolve()
+    query_mode = args.data is not None or args.data_file is not None or args.show_topology
+    if args.node_dir is None and not query_mode:
+        # Turn mode always reads seed_payload.json, so the folder stays mandatory there.
+        parser.error("the following arguments are required: --node-dir")
+    node_dir = Path(args.node_dir).resolve() if args.node_dir else None
 
     # Determine TOPOLOGY_CTRL configuration
     if args.topology_ctrl_reg:
@@ -311,6 +315,9 @@ def main() -> int:
 
     if args.data is not None or args.data_file is not None:
         return run_text_query(args, node_dir, topology_ctrl)
+
+    # Turn mode: --node-dir was validated above and is therefore present here.
+    assert node_dir is not None
 
     # Read incoming envelope from stdin
     stdin_content = sys.stdin.read().strip()

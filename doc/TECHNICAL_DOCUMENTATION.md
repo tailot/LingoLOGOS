@@ -774,7 +774,7 @@ To maintain high engineering and academic standards:
 9. **No electrical characterization.** Absolute maximum ratings, supply current ranges and junction temperature limits are not characterized, and the package entry in `asic_chip/config.json` is a declared body chosen to fit 146 signal bits plus the declared power pins, not a purchased part.
 
 ### 4.5 Coverage of the Test Suite
-`tests/` (468 tests collected, 442 of them outside the two ASIC files of section 1.10) locks,
+`tests/` (473 tests collected, 447 of them outside the two ASIC files of section 1.10) locks,
 in particular: the distribution invariant for the parser and for the
 extracted grammar; inside vs Viterbi agreement; post-pruning renormalization against
 `probability_pre_pruning`; disjoint train/test split; the corrected semantics of
@@ -1346,6 +1346,16 @@ declared nodes, the routing matrix as adjacency, and the `TOPOLOGY_CTRL` registe
 `tests/test_lllayer_text_routing.py` locks all of this: the three routes, the two refusal messages,
 mention order, the envelope round trip through `Envelope.from_dict`, and the fact that the turn path
 still replies exactly as before when no `--data` flag is present.
+
+**Which arguments query mode actually needs.** `--node-dir` stays mandatory in turn mode, because
+`generate_node_response` reads `seed_payload.json` and any recorded `turn_<n>_payload.json` from that
+folder. In query mode it is optional: the grammar source is a release package, a topology file, or the
+alphabet built into the wrapper, so none of them needs a node folder, and only `--node-id` is required
+to sign an envelope answer. A missing `--node-dir` in turn mode exits with code 2 through the argument
+parser, before any process work starts. `tests/test_lllayer_query_without_node_dir.py` (6 tests) locks
+both halves of that rule: three queries with no folder at all, the envelope identity fields they still
+carry, the refusal of a turn without a folder, and the fact that a `--data-file` written by a Windows
+editor starts without its byte order mark, so the same sentence decodes to the same tree either way.
 
 ---
 
