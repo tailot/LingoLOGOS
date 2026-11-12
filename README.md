@@ -35,6 +35,7 @@ The system integrates continuous representation learning via gradient descent wi
 2. **Differentiable CYK Engine**: Implements the Cocke-Younger-Kasami algorithm in differentiable form using soft semiring operations (`LogSumExp`), enabling backpropagation of gradients through the parsing chart.
 3. **Symbolic Extraction Layer**: Discretizes the weighted rule transition matrix via probability pruning (threshold $\tau = 0.01$) to produce a rigid formal grammar in Chomsky Normal Form (CNF).
 4. **Formal Verification Loop**: Checks the PCFG distribution invariant, compiles the extracted grammar as a Lark (Earley) grammar, proves 100% corpus yield coverage with a discrete CYK, measures rejection of **negative controls**, and proves or refutes the language inclusion $L(G) \subseteq \mathrm{Dyck}\text{-}2$ with the **Z3 SMT solver**.
+5. **Desktop Workbench (optional layer, section 16 of the technical documentation)**: a PyQt6 workbench over the whole stack in `src/gui/`, with a generic node graph, the Lllayer stream, a filesystem derived board viewer, a payload manager and a SystemVerilog analyzer. It is a closed package: no engine module imports it, it imports nothing from the engine at all, not even inside a function, and it loads no web resource. The folders and commands of the host project that it uses are declared by a workspace profile, optionally overridden by a `workbench.json` at the workspace root.
 
 ---
 
@@ -215,6 +216,15 @@ documentation cannot drift away from the code). Its contract:
 ├── doc/
 │   └── TECHNICAL_DOCUMENTATION.md # Comprehensive engineering and mathematical docs
 ├── src/
+│   ├── gui/                       # Desktop workbench, optional and offline: see section 16 of the technical documentation
+│   │   ├── app.py                 # Offline guard, command line parsing, Qt application entry point
+│   │   ├── window.py              # The shell: five modules, one shared log console, cross module routes
+│   │   ├── paths.py               # Workspace discovery and the artifact roles read from disk
+│   │   ├── theme.py               # Local palette, local fonts, Qt standard icons, the one style sheet
+│   │   ├── widgets.py             # Log console, folding cards, chips and table helpers shared by the modules
+│   │   ├── model/                 # Qt free layer: topology, board, SystemVerilog, payload, stream
+│   │   ├── workers/               # Threads: workspace scan, file parse, command runner, session replay
+│   │   └── views/                 # Painted modules: canvas, stream, board, payload table, source
 │   └── neuro_symbolic/
 │       ├── __init__.py            # Package public interface
 │       ├── parser.py              # DifferentiableCYKParser, family gate, Viterbi AST extraction
@@ -239,6 +249,18 @@ documentation cannot drift away from the code). Its contract:
 │   ├── test_evaluation_tools.py   # Gate arithmetic of the checkpoint evaluator (accuracy and audits)
 │   ├── test_hub_package.py        # safetensors round trip, mask specification, gate refusal, release folder
 │   ├── test_verification.py       # Z3 certificate (UNSAT) and refutation of over-generating grammars
+│   ├── test_workbench_paths.py    # Workspace discovery and the artifact roles read from the tree
+│   ├── test_workbench_profile.py  # Workspace profile overrides, features switched off, YAML topologies
+│   ├── test_workbench_topology_model.py # Topology dialects, extensible kinds, cycle and DAG checks
+│   ├── test_workbench_hardware_model.py # Board and fault plan read from Verilog, adaptive to N dies
+│   ├── test_workbench_dataset_model.py  # Payload fields, formats, pagination, byte identical values
+│   ├── test_workbench_stream_model.py   # Transcript events, pacing, verdicts, model assignment files
+│   ├── test_workbench_sv_model.py       # SystemVerilog symbols, mesh masks, tasks, verdict lines
+│   ├── test_workbench_runner.py         # Tool plans, verdict capture, Verilator off on Windows
+│   ├── test_workbench_offline_guard.py  # No web toolkit, no network call, no remote asset in the GUI
+│   ├── test_workbench_isolation.py      # The engine never imports the GUI, the GUI imports nothing of the project
+│   ├── test_workbench_shell.py          # The five modules, their routes, their painting, offscreen
+│   ├── test_workbench_layout.py         # Folding cards, node card sizing, canvas and schematic zoom
 │   ├── asic_reference_model.py    # Helper, not a test: independent model of the ASIC datapath, GF field and RV32E core
 │   ├── test_asic_compiler.py      # Gates that recompute every numeric claim in the ASIC tree from the committed files
 │   └── test_asic_core_firmware.py # RV32E firmware emulation checked against the committed self test table
@@ -268,7 +290,7 @@ documentation cannot drift away from the code). Its contract:
 
 The companion `datasets/multilingual/` folder (corpus, chat pairs, Dyck-2 corpus, templates, and the tools that
 validate it, learn its vocabulary, check its decoding mask, train the pure network on it and package the
-result for publication) is documented in section 11 and in `datasets/multilingual/README.md`. The learned tokenizer,
+result for publication) is an example track, not a part of the running system: it is documented in section 11 and in `datasets/multilingual/README.md`. The learned tokenizer,
 the model checkpoints and the evaluation reports live under `datasets/multilingual/checkpoints/`, which is git-ignored:
 the repository carries the code and the data that rebuild them, not the weights. The trained weights of
 the pure model are published as `model.safetensors` on the Hugging Face Hub, and section 11 gives the
@@ -332,7 +354,7 @@ $$A \to a:\ \delta = e(a),\ m = e(a) \qquad A \to B\,C:\ \delta = \delta_B + \de
 | **Selectivity (negative controls)** | `verify_negative_controls` | 100% rejection of 200 non-Dyck strings | **PASS (200/200)** |
 | **Rule induction quality** | `gold_rule_f1` | $F_1 \ge 0.90$ under NT alignment | **PASS (1.000)** |
 | **Language inclusion** | Z3 SMT Solver | **UNSAT** on certificate $+ \neg G$ | **PASS (UNSAT)** |
-| **Unit / integration tests** | pytest | All tests PASSED | **PASS (208 passed)** |
+| **Unit / integration tests** | pytest | All tests PASSED | **PASS (448 passed, 1 skipped)** |
 
 ---
 
@@ -348,6 +370,12 @@ $$A \to a:\ \delta = e(a),\ m = e(a) \qquad A \to B\,C:\ \delta = \delta_B + \de
 - Safetensors (`safetensors`), the release format of the pure-model weights
 - HTTP client for federated HTTP nodes (`httpx`)
 - pytest (`pytest`)
+- `tomli`, only on Python 3.10: the isolation gate of section 16 reads `pyproject.toml`, and its reader
+  `tomllib` is standard library only from 3.11 on, so `requirements.txt` and the `dev` extra carry
+  `tomli>=2.0.0; python_version < "3.11"` and the test falls back to it
+- PyQt6 (`PyQt6`), optional and used only by the desktop workbench of section 16; the engine, the
+  trainer and the orchestrator run without it, and nothing in `src/neuro_symbolic` or
+  `src/lingologos_orchestrator` imports Qt
 
 The federated Git transport of section 11 also needs `git` as an external program on the `PATH`; the
 orchestrator calls it to shallow clone or pull the specification cache of a Git node.
@@ -359,6 +387,7 @@ Install dependencies:
 pip install -r requirements.txt
 pip install -e .
 pip install -e ".[publish]"   # only needed to upload a release, adds huggingface_hub
+pip install -e ".[gui]"       # only needed for the desktop workbench of section 16, adds PyQt6 and PyYAML
 ```
 
 ### End-to-End Synthesis and Artifact Export
@@ -392,6 +421,72 @@ python3 src/neuro_symbolic/synthesize.py --epochs 120 --lr 3e-3 --init random --
 | `--list-only` | off | Load an existing checkpoint / artifacts and re-run verification without training. |
 | `--lenient` | off | Report gate failures without a non-zero exit code. |
 
+### Launching the Desktop Workbench
+The workbench in `src/gui/` is a desktop application over this checkout: not a service, not a web
+page. It finds the workspace by walking up from the current directory until it meets a `workbench.json`
+profile file or the pair `pyproject.toml` and `src`, so it can be started from any folder inside the
+repository:
+```bash
+lingologos-workbench                       # console script installed by pip install -e ".[gui]"
+PYTHONPATH=src python3 -m gui              # from the repository root, with no install step
+python3 -m gui --workspace PATH            # open another checkout than the current directory
+python3 -m gui --verbose                   # also print the artifact role inventory at start up
+python3 -m gui --version                   # workbench, PyQt and Qt versions, then exit
+```
+On Windows PowerShell the second line reads `$env:PYTHONPATH = "src"; python -m gui`. The five
+modules are the generic topology canvas, the Lllayer stream, the board and hardware viewer, the
+payload manager and the SystemVerilog source analyzer, and section 16 of the technical documentation
+says what each of them reads.
+Every view is filled from the filesystem: the tree, the schematic, the payload tables and the source
+list all come from what is on disk under `config/`, `datasets/`, `export_artifacts/` and
+`asic_chip/`, never from a value typed into the interface.
+
+The space the modules give each other is liquid, not a set of fixed boxes. Every sub-block of a module
+is a `widgets.Card` that folds with its own button or with a click on its title bar, and a folded card
+keeps nothing but the title bar and hands its share of the column to the cards left open. A node card
+on the canvas takes the size its own content needs: the title stays inside the header band, port names
+get their own band and are trimmed with the full name in the tool tip, and the card grows downward,
+never past the layout step, as ports and attributes are added.
+
+The canvas and the board schematic both carry Zoom out, Zoom in and a fit button in their tool row,
+plus a chip reading the current zoom. The view each module opens with is still the fit to the window it
+always had. On the schematic the wheel zooms around the pointer between 25 and 800 percent, dragging
+over empty space with the left button, or anywhere with the middle button, walks between blocks, the
+arrow keys move the view, `+`, `-` and `0` zoom in, zoom out and fit it again, and `Center selected die`
+brings the chosen block to the middle. When a board has more blocks than the drawing area can show at a
+readable size, the drawing area grows and each block keeps a minimum size, so at the default fit every
+block is still a box you can read rather than a dot.
+
+Nothing in the interface fetches anything: no CDN, no remote font, no remote icon, no embedded
+browser. The style sheet is a local string, the fonts are those Qt ships with and the host provides,
+and the icons are the standard pixmaps of the Qt style. The start up prints that rule and the process
+exits with status 3 if a web toolkit turns out to be importable in the same environment, which
+`tests/test_workbench_offline_guard.py` also asserts, together with the fact that no source of the
+package contains a URL, a network call or a remote asset token.
+
+The workbench is a closed package. The engine, the trainer and the orchestrator never import `gui`,
+and `gui` imports nothing from them, at module level or inside a function, and never edits
+`sys.path`. It reaches the project through files it reads and commands it launches as separate
+processes. Which folders and which commands, is data: a built in workspace profile, overridden by an
+optional `workbench.json` at the workspace root (keys and defaults in section 16.3 of the technical
+documentation). A key set to an empty string switches that feature off, and the button says why. The
+`[gui]` extra is optional in `pyproject.toml`, it carries PyQt6 and PyYAML, and `PyQt6` appears in
+`requirements.txt` with that same limit. `tests/test_workbench_isolation.py` enforces all of it,
+including that the names of the host project appear in code only inside the profile module.
+
+The topology canvas opens and saves JSON and YAML documents (`.json`, `.yaml`, `.yml`). PyYAML is
+imported only when a YAML document is read or written, so a JSON only session never needs it.
+
+The Verilator run buttons of the SystemVerilog module are disabled on Windows, where this repository
+drives Verilator through WSL or Docker; the tooltip and the log console name the command to run in
+that shell instead:
+```sh
+make -f asic_chip/Makefile lint-topology
+make -f asic_chip/Makefile sim-topology
+```
+Off Windows, with `verilator` on the `PATH`, the same buttons plan and run the command and the
+`FINAL VERDICT: PASS` or `FINAL VERDICT: FAIL` line of the output is captured in the log console.
+
 ### Running Test Suite
 Execute unit and integration tests:
 ```bash
@@ -399,8 +494,8 @@ pytest -v tests/
 ```
 The suite also carries the gates of the ASIC track described in section 12: `tests/test_asic_compiler.py`
 recomputes every numeric claim in `asic_chip/` from the committed files and
-`tests/test_asic_core_firmware.py` emulates the core firmware, and `tests/test_grammar_artifacts.py` re-runs the synthesis and compares the committed formal outputs, so 208 tests pass in this
-checkout with no HDL tool on the host. The ASIC steps that do need an external tool are
+`tests/test_asic_core_firmware.py` emulates the core firmware, and `tests/test_grammar_artifacts.py` re-runs the synthesis and compares the committed formal outputs, so 448 tests pass in this
+checkout with no HDL tool on the host (449 collected, one skipped for a missing optional artifact). The ASIC steps that do need an external tool are
 documented in `asic_chip/doc/build_instructions.md`: Verilator 5.054 linted and simulated the
 design inside the image `verilator/verilator:latest`, OpenLane 2.3.10 with the sky130A PDK ran
 two complete place and routes in WSL Ubuntu, and Icarus Verilog has never run here. The
@@ -409,12 +504,21 @@ topology switch of section 14 is covered by `make -f asic_chip/Makefile lint-top
 
 ### Continuous Integration (GitHub Actions)
 Tests and formal verification run automatically on push or pull requests via `.github/workflows/ci.yml` across Python **3.10**, **3.11**, and **3.12**.
+The workbench tests build real Qt widgets, so that pipeline installs the native libraries Qt needs to load (`libegl1`, `libgl1`, `libglib2.0-0`, font config, `libxkbcommon-x11-0` and the `libxcb-*` pieces) and sets `QT_QPA_PLATFORM=offscreen`, which paints them in memory and never opens a window. On a host where the Qt runtime still cannot load, the modules that build widgets skip with the reason they hit, and the filesystem, model and isolation tests of the workbench keep running.
+The matrix reaches down to 3.10 while `tests/test_workbench_isolation.py` reads `pyproject.toml`, and `tomllib` only exists from 3.11 on: that module imports it through a fallback to `tomli`, and `requirements.txt` plus the `dev` extra carry `tomli` under a `python_version < "3.11"` marker, so 3.10 installs it and newer interpreters do not.
 The companion pipeline `.github/workflows/dataset.yml` runs on changes under `datasets/multilingual/`: corpus consistency, the tokenizer gates `T1`-`T5`, the mask gates `M1`-`M5`, grammar induction, and the GitHub Release that carries the artifacts.
 The ASIC gates run inside `pytest -v tests/` and therefore in CI, because they are pure Python; the Verilator and OpenLane steps are not in CI, and `asic_chip/doc/verification_report.md` states that as a limit on what is verified.
 
 ---
 
 ## 11. Synthetic Multilingual Dataset and the Pure Model Track
+
+**Everything in this section is an example.** The corpus, the learned tokenizer, the masking plan, the
+induced grammar, the pure model and the numbers reported for them are a worked demonstration of the
+pipeline on synthetic data, kept so every gate and every measurement has something to run against.
+None of it is a feature of the assistant, a component the product loads at run time, or a claim about a
+deployed system: the product is the deterministic engine, the ASIC track and the workbench of sections
+1 to 10 and 12 to 16.
 
 The folder `datasets/multilingual/` is independent from the system described above: it holds a corpus
 plus the scripts that build and check it, and nothing in `src/` reads it while the
@@ -698,7 +802,7 @@ refuses to start a place and route until `--check` passes, which is what keeps a
 
 ### 12.3 Verification status, executed against not run
 
-`python -m pytest -v tests/` in this checkout: **208 passed**, zero failures, zero errors; the synthesis that `tests/test_grammar_artifacts.py` performs once per session accounts for about 16 s of that wall time.
+`python -m pytest -v tests/` in this checkout: **448 passed, 1 skipped**, zero failures, zero errors; the synthesis that `tests/test_grammar_artifacts.py` performs once per session accounts for about 16 s of that wall time.
 Twenty six of those tests target the ASIC tree: twenty in `tests/test_asic_compiler.py`
 and six in `tests/test_asic_core_firmware.py`, plus the helper model in
 `tests/asic_reference_model.py` that recomputes the dot product, the GF field, the clause

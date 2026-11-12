@@ -21,6 +21,11 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
+    "tomli>=2.0.0; python_version < '3.11'",
+]
+gui = [
+    "PyQt6>=6.6.0",
+    "PyYAML>=6.0",
 ]
 publish = [
     "huggingface_hub>=0.23.0",
@@ -29,6 +34,7 @@ publish = [
 [project.scripts]
 lingologos-orchestrator = "lingologos_orchestrator.cli:main"
 lllayer = "lingologos_orchestrator.lllayer:main"
+lingologos-workbench = "gui.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -6,4 +6,6 @@ numpy>=1.24.0
 safetensors>=0.4.0
 huggingface_hub>=0.23.0
 pytest>=8.0.0
+tomli>=2.0.0; python_version < "3.11"  # test gate only: tomllib is standard library from 3.11 on
 httpx>=0.24.0
+PyQt6>=6.6.0  # desktop workbench only: the engine, the trainer and the orchestrator never import Qt
