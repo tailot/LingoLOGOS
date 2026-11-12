@@ -16,8 +16,29 @@ runtime_state/
 # cache/nodes/<node_id> by the transport resolver, so the folder is regenerated on demand.
 cache/
 
+# Local material policy for the two user-facing folders, expressed with the
+# exclusion technique: the folders are ignored wholesale, and the shipped material
+# is brought back into the index one entry at a time by the negation patterns
+# below. Anything a user adds there -- a new corpus under datasets/<name>/, a new
+# topology document under topologies/ -- stays out of git from the moment it is
+# saved, with no further edit of this file. The last matching pattern wins, so the
+# negations follow the folder patterns, and a folder is re-included before the
+# files inside it are matched again. Tracked files are unaffected by these rules.
+datasets/*
+topologies/*
+
+# Shipped datasets: the three federated node payloads and the multilingual
+# companion corpus with its tools.
+!datasets/agente_alfa/
+!datasets/agente_beta/
+!datasets/arbitro_logico/
+!datasets/multilingual/
+
+# Shipped topology document, read by tests/test_federation.py.
+!topologies/federated_mesh.json
+
 # Dataset companion folder: corpus and tools are versioned here,
-# training outputs stay local.
+# training outputs stay local. These two rules apply inside the re-included folder.
 datasets/multilingual/checkpoints/
 datasets/multilingual/_smoke/
 .venv*/

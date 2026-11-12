@@ -266,7 +266,9 @@ documentation cannot drift away from the code). Its contract:
 │   └── test_asic_core_firmware.py # RV32E firmware emulation checked against the committed self test table
 ├── config/
 │   └── topology.json              # Topology definition and routing matrix
-├── datasets/
+├── topologies/                    # Ignored by default, the shipped document is re-included
+│   └── federated_mesh.json        # Federated mesh over the nodes of this repository
+├── datasets/                      # Ignored by default, the shipped folders are re-included
 │   ├── agente_alfa/               # Datasets, SMT ontology, and GF grammar for node
 │   ├── agente_beta/
 │   ├── arbitro_logico/
@@ -295,6 +297,16 @@ the model checkpoints and the evaluation reports live under `datasets/multilingu
 the repository carries the code and the data that rebuild them, not the weights. The trained weights of
 the pure model are published as `model.safetensors` on the Hugging Face Hub, and section 11 gives the
 command that builds and uploads that release.
+
+`datasets/` and `topologies/` are the two folders where a user writes their own material, a corpus for a new
+node or a topology document saved from the workbench canvas, so `.gitignore` keeps both folders out of the
+index by default and re-includes only the shipped entries above. The rule is written with the exclusion
+technique: `datasets/*` and `topologies/*` ignore everything, and the negation lines `!datasets/agente_alfa/`,
+`!datasets/agente_beta/`, `!datasets/arbitro_logico/`, `!datasets/multilingual/` and
+`!topologies/federated_mesh.json` bring back the versioned material. A dataset or a topology you create is
+therefore never tracked and never shows up in `git status`, with no edit of the file needed; adding a dataset
+or a topology to the repository takes one extra negation line. Section 4.3 of
+`doc/TECHNICAL_DOCUMENTATION.md` states the same policy and the two ordering constraints it depends on.
 
 Every tool inside that folder starts from its own file, so the corpus has no fixed position
 in the repository: `datasets/multilingual/tools/corpus_paths.py` walks up until it finds the
