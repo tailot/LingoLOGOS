@@ -12,10 +12,17 @@ import argparse
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from .schema import Envelope, VolatileState, Payload, SMTConstraints
+from .schema import Envelope, VolatileState, Payload, SMTConstraints, OrchestratorError
 from .topology_ctrl import TopologyCtrlRegister
 from .lllayer_masker import NativeASTLogitsProcessor
 from .lllayer_engine import IncrementalASTEngine, SimpleASTGrammar, MockRunnerModel
+from .lllayer_text import (
+    GRAMMAR_AUTO,
+    GRAMMAR_CHOICES,
+    load_topology_binding,
+    render_report,
+    route_text,
+)
 
 
 def discover_board_topology(
@@ -65,46 +72,15 @@ def run_constrained_ast_decoding(
     incoming_ast: str,
     vocab_size: int = 16,
 ) -> str:
-    """Executes a volatile in-memory AST constrained decoding session."""
-    tokens = ["ROOT", "(", "Transition", "StateA", "StateB", ")", "END", "MODIFIER"]
-    token_to_id = {t: i for i, t in enumerate(tokens)}
-    id_to_token = {i: t for i, t in enumerate(tokens)}
+    """Executes a volatile in-memory AST constrained decoding session.
 
-    node_types = {"MODIFIER": "OPTIONAL_MODIFIER"}
-    transitions = {
-        ("ROOT", "("): "NODE_OPN",
-        ("NODE_OPN", "Transition"): "NODE_TRANS",
-        ("NODE_TRANS", "StateA"): "NODE_S1",
-        ("NODE_S1", "StateB"): "NODE_S2",
-        ("NODE_S2", ")"): "TERMINAL",
-        ("NODE_TRANS", "MODIFIER"): "MODIFIER",
-        ("MODIFIER", ")"): "TERMINAL",
-    }
-    valid_tokens = {
-        "ROOT": {token_to_id["("]},
-        "NODE_OPN": {token_to_id["Transition"]},
-        "NODE_TRANS": {token_to_id["StateA"], token_to_id["MODIFIER"]},
-        "NODE_S1": {token_to_id["StateB"]},
-        "NODE_S2": {token_to_id[")"]},
-        "MODIFIER": {token_to_id[")"]},
-    }
-    closing_tokens = {token_to_id[")"]}
-
-    grammar = SimpleASTGrammar(
-        token_to_id=token_to_id,
-        id_to_token=id_to_token,
-        node_types=node_types,
-        transitions=transitions,
-        valid_tokens=valid_tokens,
-        closing_tokens=closing_tokens,
-        terminal_nodes={"TERMINAL", "END"},
-    )
-
-    processor = NativeASTLogitsProcessor(vocab_size=max(vocab_size, len(tokens)))
-    runner_model = MockRunnerModel(vocab_size=processor.vocab_size, token_to_id=token_to_id, id_to_token=id_to_token)
-    engine = IncrementalASTEngine(grammar_spec=grammar, logits_processor=processor)
-
-    return engine.run_session(prompt=incoming_ast, runner_model=runner_model)
+    The built-in AST alphabet lives in :mod:`lingologos_orchestrator.lllayer_text`,
+    which is the same session ``--data`` reaches from the command line. The
+    ``vocab_size`` argument is retained for interface compatibility: it sizes the
+    volatile mask vector and never changes the decoded tree.
+    """
+    del node_id, role, vocab_size
+    return route_text(incoming_ast, grammar="generic").tree
 
 
 def generate_node_response(
@@ -187,6 +163,91 @@ def generate_node_response(
     )
 
 
+def text_query_envelope(
+    node_id: str,
+    topology_ctrl: TopologyCtrlRegister,
+    result: Any,
+    incoming: Optional[Envelope] = None,
+) -> Envelope:
+    """Wraps one --data routing result in the node envelope protocol."""
+    tick = incoming.volatileState.internalTimeTick if incoming is not None else 0
+    turn = incoming.turn if incoming is not None else 0
+    recipient = incoming.sender if incoming is not None and incoming.sender != node_id else None
+    extra = {"grammarSource": result.grammar, "grammarRoute": result.to_dict()}
+    out_payload = Payload(
+        naturalLanguage=str(result.evidence.get("text", "")),
+        abstractSyntaxTree=result.tree,
+        smtConstraints=SMTConstraints(
+            declarations=[],
+            assertions=["(assert true)"],
+            z3Status="sat",
+        ),
+    )
+    envelope = Envelope(
+        sender=node_id,
+        recipient=recipient,
+        turn=turn,
+        volatileState=VolatileState(internalTimeTick=tick, extra=extra),
+        payload=out_payload,
+    )
+    envelope.topologyCtrl = topology_ctrl.to_dict()
+    envelope.datasetId = topology_ctrl.dataset_id
+    return envelope
+
+
+def run_text_query(args, node_dir: Path, topology_ctrl: TopologyCtrlRegister) -> int:
+    """Handles a --data query: one sentence in, one validated syntax tree out."""
+    query_text = args.data
+    if query_text is None and args.data_file:
+        data_path = Path(args.data_file)
+        if not data_path.is_file():
+            print("lllayer: text file not found: " + str(data_path), file=sys.stderr)
+            return 2
+        query_text = data_path.read_text(encoding="utf-8")
+
+    incoming_envelope: Optional[Envelope] = None
+    if not sys.stdin.isatty():
+        incoming_content = sys.stdin.read().strip()
+        if incoming_content:
+            incoming_envelope = Envelope.from_dict(json.loads(incoming_content))
+
+    output_shape = args.format
+    if output_shape == "auto":
+        output_shape = "envelope" if incoming_envelope is not None else "report"
+
+    try:
+        result = route_text(
+            query_text,
+            grammar=args.grammar,
+            topology_config=Path(args.topology_config) if args.topology_config else None,
+            model_package=Path(args.model_package) if args.model_package else None,
+            dataset_root=Path(args.dataset_root) if args.dataset_root else None,
+            node_dir=node_dir,
+            device=args.device,
+            max_steps=args.max_decode_steps,
+        )
+    except (OrchestratorError, OSError) as error:
+        print("lllayer: " + str(error), file=sys.stderr)
+        return 2
+
+    # A decoded tree may hold non-ASCII payload tokens, so the console is set to UTF-8.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):  # pragma: no cover - depends on the host stream
+        pass
+
+    if output_shape == "tree":
+        print(result.tree)
+    elif output_shape == "json":
+        print(json.dumps(result.to_dict(), indent=2))
+    elif output_shape == "envelope":
+        envelope = text_query_envelope(args.node_id, topology_ctrl, result, incoming_envelope)
+        print(json.dumps(envelope.to_dict(), indent=2))
+    else:
+        print(render_report(result))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="LingoLOGOS CLI Process Wrapper (lllayer) for isolated node execution."
@@ -199,6 +260,21 @@ def main() -> int:
     parser.add_argument("--dataset-id", type=int, default=0, help="Logical dataset ID assigned to this node.")
     parser.add_argument("--topology-ctrl-reg", type=str, default=None, help="Optional raw hex or JSON for TOPOLOGY_CTRL register.")
     parser.add_argument("--constrained-decoding", action="store_true", help="Enable in-memory AST-guided logits masker decoding.")
+    parser.add_argument("--data", type=str, default=None, help="Text to route into a syntax tree (query mode, no envelope reply needed).")
+    parser.add_argument("--data-file", type=str, default=None, help="Path of a UTF-8 text file holding the text to route.")
+    parser.add_argument(
+        "--grammar",
+        choices=list(GRAMMAR_CHOICES),
+        default=GRAMMAR_AUTO,
+        help="Grammar source for --data: auto, generic, topology (declared topology) or dataset (trained package).",
+    )
+    parser.add_argument("--topology-config", type=str, default=None, help="Topology JSON declaring the nodes and routing matrix for --data.")
+    parser.add_argument("--model-package", type=str, default=None, help="Release package folder with tokenizer.json, mask_spec.json and weights.")
+    parser.add_argument("--dataset-root", type=str, default=None, help="Dataset folder whose checkpoints hold the release package.")
+    parser.add_argument("--device", type=str, default="cpu", help="Torch device for the dataset grammar (cpu, cuda).")
+    parser.add_argument("--max-decode-steps", type=int, default=None, help="Decode step cap for the dataset grammar.")
+    parser.add_argument("--format", choices=["auto", "tree", "report", "json", "envelope"], default="auto", help="Output shape of a --data query.")
+    parser.add_argument("--show-topology", action="store_true", help="Print the declared nodes and routing matrix of --topology-config and exit.")
     args = parser.parse_args()
 
     node_id = args.node_id
@@ -217,6 +293,24 @@ def main() -> int:
             discovered_peers_count=args.probe_peers,
             dataset_id=args.dataset_id,
         )
+
+    # Query mode: the node answers one sentence and returns one validated tree.
+    if args.show_topology:
+        if not args.topology_config:
+            print("lllayer: --show-topology needs --topology-config PATH", file=sys.stderr)
+            return 2
+        try:
+            binding = load_topology_binding(Path(args.topology_config))
+        except (OrchestratorError, OSError) as error:
+            print("lllayer: " + str(error), file=sys.stderr)
+            return 2
+        declaration = binding.to_dict()
+        declaration["topologyCtrl"] = topology_ctrl.to_dict()
+        print(json.dumps(declaration, indent=2))
+        return 0
+
+    if args.data is not None or args.data_file is not None:
+        return run_text_query(args, node_dir, topology_ctrl)
 
     # Read incoming envelope from stdin
     stdin_content = sys.stdin.read().strip()

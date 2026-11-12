@@ -774,7 +774,7 @@ To maintain high engineering and academic standards:
 9. **No electrical characterization.** Absolute maximum ratings, supply current ranges and junction temperature limits are not characterized, and the package entry in `asic_chip/config.json` is a declared body chosen to fit 146 signal bits plus the declared power pins, not a purchased part.
 
 ### 4.5 Coverage of the Test Suite
-`tests/` (449 tests collected, 423 of them outside the two ASIC files of section 1.10) locks,
+`tests/` (468 tests collected, 442 of them outside the two ASIC files of section 1.10) locks,
 in particular: the distribution invariant for the parser and for the
 extracted grammar; inside vs Viterbi agreement; post-pruning renormalization against
 `probability_pre_pruning`; disjoint train/test split; the corrected semantics of
@@ -808,6 +808,16 @@ the model card prints, refusal of a report that does not read `PASS`, refusal of
 vocabulary disagrees with the tokenizer it names, and the assembled folder: every declared artifact
 present, every recorded sha256 verified against the file on disk, stray files from an earlier run left
 out of the manifest.
+
+The node wrapper adds `tests/test_lllayer_text_routing.py` (19 tests): the generic alphabet with and
+without the modifier word, the parity between the turn harness and the query path, the topology
+binding read from `config/topology.json`, mention order deciding which endpoint is the source,
+refusal of a route a restricted routing matrix does not declare, refusal of a sentence naming one node
+only, a corpus sentence decoded into a stream the algebra automaton revalidates symbol by symbol, the
+package that reports what a folder is missing, and the command line contract checked in a separate
+interpreter: tree output, the envelope that comes back when an envelope was piped in, the dataset
+report, `--show-topology`, exit code 2 with a single English line on stderr and empty stdout, and the
+turn path unchanged when no query flag is present.
 
 The hardware track adds two suites and one helper. `tests/asic_reference_model.py` is not a test file:
 it is an independent model of the chip, with its own dot product, its own `GF(2^8)` arithmetic over
@@ -1129,7 +1139,8 @@ When encountering a node whose semantic salience is not essential (such as `OPTI
 - **C-FFI Kernel (`src/lingologos_orchestrator/native/masker.cpp`)**: Exports `masker_init`, `masker_update_allowed`, `masker_apply_in_place`, and `masker_free`. Reuses contiguous RAM float buffer across steps with zero allocations inside the loop.
 - **Python Bridge (`src/lingologos_orchestrator/lllayer_masker.py`)**: `NativeASTLogitsProcessor` manages C pointers, zero-copy contiguous numpy array pass-through, and graceful fallback to numpy in memory.
 - **Incremental Engine (`src/lingologos_orchestrator/lllayer_engine.py`)**: `IncrementalASTEngine` drives step-by-step decoding, AST stack tracking, and subtree pruning triggers.
-- **CLI Flag (`lllayer`)**: `--constrained-decoding` activates the in-memory AST-guided logits masker for node execution.
+- **Routing Core (`src/lingologos_orchestrator/lllayer_text.py`)**: `route_text` selects the grammar source (built-in alphabet, declared topology, trained package), scores the tokens the sentence actually mentions, decodes under the mask, and verifies the result. Section 15.8 states the invariants.
+- **CLI Flag (`lllayer`)**: `--constrained-decoding` activates the in-memory AST-guided logits masker for node execution. `--data` and `--data-file` activate the text query path of section 15.8.
 
 ### 15.5 Host Support for the Masking Kernel
 
@@ -1202,12 +1213,14 @@ The current engine is a reference harness rather than the production decoding pa
 matters when the flag is evaluated against topologies and datasets.
 
 - **Fixed reference grammar**: `run_constrained_ast_decoding(node_id, role, incoming_ast, vocab_size)`
-  builds a hard-coded eight token micro-grammar (`ROOT`, `(`, `Transition`, `StateA`, `StateB`, `)`,
+  is now a thin call into `route_text(incoming_ast, grammar="generic")` of section 15.8, which builds
+  the same hard-coded eight token micro-grammar (`ROOT`, `(`, `Transition`, `StateA`, `StateB`, `)`,
   `END`, `MODIFIER`). The incoming AST reaches `run_session` as `prompt` and is never consumed, and
   the node folder (`grammar.gf`, `ontology.smt2`, `seed_payload.json`) is never read. Measured on the
-  three shipped datasets, the decoded AST is the same string
+  three shipped datasets, the payload AST is the same string
   `( Transition StateA StateB ) (Node <node_id>)` for `agente_alfa`, `agente_beta`, and
-  `arbitro_logico`, regardless of the AST carried by the envelope.
+  `arbitro_logico`, regardless of the AST carried by the envelope: the helper returns the tree and the
+  reply builder of `generate_node_response` appends the `(Node <node_id>)` suffix.
 - **Pruning stays dormant through the CLI**: `MockRunnerModel.get_logits` returns a constant vector
   and `sample` takes the greedy argmax, so at `NODE_TRANS` the lower indexed essential token wins over
   `MODIFIER` and the ancillary projection $\pi$ of section 15.3 is never triggered. Only the dedicated
@@ -1226,11 +1239,113 @@ matters when the flag is evaluated against topologies and datasets.
   `Termination reason: SAT_CONVERGENCE`, `Verdict: PASS`, and no turn of the transcript carries the
   constrained decoding payload, so `--constrained-decoding` is currently an isolated single-node
   capability.
-- **Two masking stacks are not unified yet**: grammar driven masking for the learned model lives in
-  `src/neuro_symbolic/masking.py` through `AlgebraMask` and `TokenStreamMask`, which walk the bracket
-  algebra over the tokenizer ids. The `lllayer` engine consumes neither `artifacts/grammar.json` nor
-  the tokenizer, so the `lllayer_masker` kernel is a separate, smaller mechanism that a future change
-  is expected to fold into that automaton.
+- **Masking stacks are folded on the dataset route**: grammar driven masking for the learned model
+  lives in `src/neuro_symbolic/masking.py` through `AlgebraMask` and `TokenStreamMask`, which walk the
+  bracket algebra over the tokenizer ids. `DatasetGrammarRouter` of section 15.8 asks
+  `TokenStreamMask.allowed_next_ids(prefix)` for the admitted ids at each step and passes that set to
+  `NativeASTLogitsProcessor.update_mask_from_ast_state`, so the algebra automaton now drives the same
+  zero copy kernel of section 15.2 instead of a parallel mechanism. The turn path described above
+  still runs its own eight token alphabet, and that is the smaller surface a future change is
+  expected to replace.
+
+### 15.8 Text Routing: One Sentence In, One Validated Tree Out (`--data`)
+
+Until this section the node only answered envelope turns, and no path accepted a sentence. `--data
+TEXT` and `--data-file PATH` add a query mode: the sentence is routed to a grammar source, decoded
+under the in-memory mask of section 15.2, and returned as a tree. The turn protocol is untouched, the
+wrapper without those flags is byte for byte what it was, and the harness of section 15.7 is now one
+call into the same core with `grammar="generic"`.
+
+**Grammar sources.** `route_text(text, grammar, topology_config, model_package, dataset_root,
+node_dir, device, max_steps)` in `src/lingologos_orchestrator/lllayer_text.py` owns the routing;
+`lllayer.py` keeps only argument plumbing and envelope conversion.
+
+| `--grammar` | alphabet | admissible set $\mathcal{A}(s_t)$ built from | prerequisites |
+| :--- | :--- | :--- | :--- |
+| `generic` | the eight token micro-grammar of section 15.7 | `SimpleASTGrammar` transitions of `lllayer_engine` | none |
+| `topology` | `(`, `Transition`, the node ids of the topology, `MODIFIER`, `)` | `TopologyConfig` instances and its `routingMatrix` | `--topology-config` |
+| `dataset` | the learned tokenizer of a release package | `TokenStreamMask` and `AlgebraMask` of `src/neuro_symbolic/masking.py` | a package holding `tokenizer.json`, `mask_spec.json`, and `model.safetensors` or `model.pt` |
+| `auto` | first source that resolves: explicit `--model-package`, a package inside `--node-dir`, `--topology-config`, then `generic` | | default |
+
+**Evidence scoring.** On the `generic` and `topology` routes the runner is a scoring function over the
+sentence rather than a language model, because a declared symbol the sentence never mentions must not
+be selectable. With $\Sigma_{\text{structure}}$ the structural tokens, $p_i$ the position of the first
+mention of token $i$, $p_{\max}$ the largest such position and $u \geq 1$ the number of mentioned
+symbols:
+
+$$z_i = \begin{cases} 1.0 & i \in \Sigma_{\text{structure}} \\[4pt] 1 + \dfrac{p_{\max} - p_i}{u} & i \in \Sigma_{\text{mentioned}} \\[4pt] 0 & \text{otherwise} \end{cases}$$
+
+The greedy argmax of $\mathbf{\hat{z}}_t = \mathbf{z}_t + \mathbf{m}_t$ never picks a declared symbol
+absent from the sentence, and among mentioned symbols the earlier mention wins, which is what reads
+"from X to Y" with X as the source. Mention matching uses `fold_text` (NFKD, combining marks dropped,
+lowercase, non alphanumerics collapsed to spaces), so `agente_alfa`, `Agente Alfa` and `alfa` are the
+same mention, in ASCII insensitive form.
+
+**Routing matrix inside the mask.** For the topology grammar the transition relation is constructed
+from the declared edges, so at the route state
+
+$$\mathcal{A}(s_{\text{ROUTE}}) = \{ \mathrm{id}(n) \in \mathcal{V} \mid (s_{\text{source}}, n) \in E\}$$
+
+with $E$ the routing matrix. An undeclared edge is not penalised, it is unrepresentable: no decoding
+path reaches it, and the model cannot invent an endpoint.
+
+**The four checks that close every route.** They run after decoding because the mask guarantees
+well-formedness while grounding is a property of the scores, not of the automaton:
+
+1. **Well-formedness**: `validate_parentheses` on the parenthesis algebra for `generic` and
+   `topology`; `mask.validate_stream(symbols)` for `dataset`, the same oracle the `M` gates use.
+2. **Grounding**: every non structural symbol of the tree has a mention in the folded sentence.
+3. **Declaration**: on the `topology` route, every node symbol is a declared instance and the decoded
+   pair is a declared edge.
+4. **Refusal**: a violation raises `TextRoutingError`, the CLI prints one English line on stderr,
+   exits with code 2, prints nothing on stdout, and the line lists the declared alternatives, so the
+   caller can retry with a valid sentence instead of parsing an invented tree.
+
+**Measured on this host** (CPU, hub package under `datasets/multilingual/checkpoints/hub`, 3921
+tokens, 53 operators, weights loaded in about 0.3 seconds, decode in about 0.3 seconds per sentence;
+the C kernel of section 15.4 is unavailable here, so the numpy fallback of `is_native=False` runs):
+
+```bash
+export PYTHONPATH=src
+python -m lingologos_orchestrator.lllayer --node-id agente_alfa --node-dir datasets/agente_alfa \
+  --data "notifica l utente in caso di allarme urgente" --format tree
+( Transition MODIFIER )
+
+python -m lingologos_orchestrator.lllayer --node-id agente_alfa --node-dir datasets/agente_alfa \
+  --topology-config config/topology.json \
+  --data "passa da agente alfa ad arbitro logico" --format tree
+( Transition agente_alfa arbitro_logico )
+
+python -m lingologos_orchestrator.lllayer --node-id agente_alfa --node-dir datasets/agente_alfa \
+  --dataset-root datasets/multilingual \
+  --data "Se la temperatura supera 24 gradi, spegni il condizionatore."
+grammar: dataset
+tree:    ( IF ( BETWEEN [ temperature ] [ celsius 24 ] [ celsius 24 ] ) ( OFF [ air_conditioner ] ) )
+skeleton: (([][][])([]))
+valid:   yes  steps: 47
+model:   datasets/multilingual/checkpoints/hub model.safetensors vocab=3921 operators=53
+```
+
+The third example carries the honest caveat. The multilingual decoder maps a sentence straight to a
+tree, and the gate table of section 2.4 measures exact tree 0.9393 over the 675 test rows, 0.835 on
+the `threshold` family, with bracket skeleton 1.0000 and legality 675 out of 675. The decoded tree
+above is therefore legal and grounded, but the operator choice is the model decision, not the
+constraint: `BETWEEN` repeats its argument where the reference tree has a different shape. The mask
+cannot fix that and the formal check stays in the path for exactly this reason.
+
+**Envelope compatibility.** In query mode stdin is read only when it is not a terminal, so an
+interactive shell does not block. If an envelope arrives on stdin, the answer is an envelope:
+`payload.naturalLanguage` carries the sentence, `payload.abstractSyntaxTree` the decoded tree,
+`volatileState.grammarSource` the grammar name, and `volatileState.grammarRoute` the full evidence
+dictionary (mentioned symbols with positions, candidate routes, the decoded route, package
+statistics). `topologyCtrl` and `datasetId` propagate as before. `--format auto` picks `envelope`
+when an envelope came in and a human readable report otherwise; `--format tree` prints the tree only,
+which is the form meant for scripts. `--show-topology` prints the binding as JSON: session id,
+declared nodes, the routing matrix as adjacency, and the `TOPOLOGY_CTRL` register of section 14.3.
+
+`tests/test_lllayer_text_routing.py` locks all of this: the three routes, the two refusal messages,
+mention order, the envelope round trip through `Envelope.from_dict`, and the fact that the turn path
+still replies exactly as before when no `--data` flag is present.
 
 ---
 

@@ -495,7 +495,7 @@ pytest -v tests/
 The suite also carries the gates of the ASIC track described in section 12: `tests/test_asic_compiler.py`
 recomputes every numeric claim in `asic_chip/` from the committed files and
 `tests/test_asic_core_firmware.py` emulates the core firmware, and `tests/test_grammar_artifacts.py` re-runs the synthesis and compares the committed formal outputs, so 448 tests pass in this
-checkout with no HDL tool on the host (449 collected, one skipped for a missing optional artifact). The ASIC steps that do need an external tool are
+checkout with no HDL tool on the host (468 collected, one skipped for a missing optional artifact). The ASIC steps that do need an external tool are
 documented in `asic_chip/doc/build_instructions.md`: Verilator 5.054 linted and simulated the
 design inside the image `verilator/verilator:latest`, OpenLane 2.3.10 with the sky130A PDK ran
 two complete place and routes in WSL Ubuntu, and Icarus Verilog has never run here. The
@@ -802,7 +802,7 @@ refuses to start a place and route until `--check` passes, which is what keeps a
 
 ### 12.3 Verification status, executed against not run
 
-`python -m pytest -v tests/` in this checkout: **448 passed, 1 skipped**, zero failures, zero errors; the synthesis that `tests/test_grammar_artifacts.py` performs once per session accounts for about 16 s of that wall time.
+`python -m pytest -v tests/` in this checkout: **467 passed, 1 skipped**, zero failures, zero errors; the synthesis that `tests/test_grammar_artifacts.py` performs once per session accounts for about 16 s of that wall time.
 Twenty six of those tests target the ASIC tree: twenty in `tests/test_asic_compiler.py`
 and six in `tests/test_asic_core_firmware.py`, plus the helper model in
 `tests/asic_reference_model.py` that recomputes the dot product, the GF field, the clause
@@ -986,6 +986,54 @@ consumed exclusively by the isolated `lllayer` CLI, because `NodeProcessRunner` 
 command line without flag pass-through, so topology, federated, and consolidated sessions never
 activate it. The full matrix and the measured results are recorded in section 15.5 of
 `doc/TECHNICAL_DOCUMENTATION.md`.
+
+Query the same node with a sentence instead of an envelope. `--data TEXT` (or `--data-file PATH`)
+routes the text to a grammar source and returns one decoded tree, and the source decides the alphabet:
+
+```bash
+# generic: the built-in alphabet of the node, no corpus and no topology file needed
+lllayer --node-id agente_alfa --node-dir datasets/agente_alfa \
+  --data "notifica l utente in caso di allarme urgente" --format tree
+( Transition MODIFIER )
+
+# topology: the declared node names and the routing matrix become the alphabet
+lllayer --node-id agente_alfa --node-dir datasets/agente_alfa \
+  --topology-config config/topology.json \
+  --data "passa da agente alfa ad arbitro logico" --format tree
+( Transition agente_alfa arbitro_logico )
+
+# what the topology declares, before asking it anything
+lllayer --node-id agente_alfa --node-dir datasets/agente_alfa \
+  --topology-config config/topology.json --show-topology
+
+# dataset: the trained multilingual model, any corpus language in, validated bracket tree out
+lllayer --node-id agente_alfa --node-dir datasets/agente_alfa \
+  --dataset-root datasets/multilingual \
+  --data "Se la temperatura supera 24 gradi, spegni il condizionatore."
+grammar: dataset
+tree:    ( IF ( BETWEEN [ temperature ] [ celsius 24 ] [ celsius 24 ] ) ( OFF [ air_conditioner ] ) )
+skeleton: (([][][])([]))
+valid:   yes  steps: 47
+model:   datasets/multilingual/checkpoints/hub model.safetensors vocab=3921 operators=53
+```
+
+With no `--grammar` the order is: the package named by `--model-package`, a package inside
+`--node-dir`, `--topology-config`, then the generic alphabet. `--grammar generic|topology|dataset`
+forces one and refuses instead of falling back. The bracket algebra automaton of
+`src/neuro_symbolic/masking.py` feeds its admissible token ids into the same in-place masking kernel
+of `--constrained-decoding`, so an illegal skeleton or an undeclared route cannot be sampled at all:
+a route the routing matrix does not declare never enters the mask. After decoding the tree is checked
+again for well-formedness, for grounding (every non structural symbol must appear in the sentence,
+matched in accent-insensitive form), and for declaration. A refusal exits with code 2, prints one
+English line on stderr listing the declared alternatives, and prints nothing on stdout. `--format
+tree` is the scripting form, `--format report|json` print the evidence (mentioned symbols with their
+positions, candidate routes, the decoded route, package statistics), and when an envelope is piped on
+stdin the answer is an envelope carrying the tree in `payload.abstractSyntaxTree` with the evidence
+under `volatileState.grammarRoute`, so the turn protocol of section 13.1 still holds. The dataset
+route loads the torch weights only when it is selected, and it inherits the measured limits of the
+model it reads: exact tree 0.9393 over the 675 test rows, 0.835 on the `threshold` family, bracket
+skeleton always correct, legality 675 out of 675, which is why the formal check stays in the path.
+Section 15.8 of `doc/TECHNICAL_DOCUMENTATION.md` states the invariants and the measured commands.
 
 ---
 
