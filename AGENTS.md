@@ -62,3 +62,17 @@ Before completing any change or submission, the AI agent **MUST** run the follow
    - `artifacts/DynamicGrammarIta.gf` is properly generated.
    - Corpus coverage rate is strictly 100%.
    - Formal Z3 SMT verification results in **UNSAT** (100% Soundness).
+
+---
+
+## 5. Mandatory Workbench Isolation Rule (the UI Never Depends on the Project)
+
+The desktop workbench under `src/gui/` is a closed package. The AI agent **MUST NOT** introduce any dependency from the interface toward the rest of this repository:
+
+1. **No imports**: no module of `src/gui/` may import any module of the project outside that package (the engine, the trainer, the orchestrator, the ASIC scripts, the tools under `datasets/`), at module level or inside a function, may not import dynamically except lazily inside `gui` itself, and may not touch `sys.path`.
+2. **No project names in code**: the identifiers of the host project (module names, make targets, script paths, project folders) may appear in code string literals only inside `src/gui/model/profile.py`, the workspace profile. Docstrings and comments may still describe the project.
+3. **Files and processes are the only channels**: the workbench reaches the project through files it reads from the workspace and commands it launches as separate processes, configured by the built-in profile and by an optional `workbench.json` at the workspace root. Values are never hardcoded elsewhere, and never typed into the interface.
+4. **No reverse dependency**: modules of the project outside `src/gui/` must never import `gui`, and the GUI toolkit must stay in the optional `[gui]` extra of `pyproject.toml` (with `PyQt6` carrying the same limit in `requirements.txt`).
+5. **Nothing remote**: no web toolkit, no embedded browser, no CDN, no remote font, icon or asset, no network call inside the interface. The style sheet, the fonts and the icons are local.
+
+`tests/test_workbench_isolation.py` and `tests/test_workbench_offline_guard.py` enforce all of it from the syntax trees; section 16 of `doc/TECHNICAL_DOCUMENTATION.md` states the same rule as part of the design.

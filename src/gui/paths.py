@@ -1,0 +1,305 @@
+"""Filesystem view of the workspace: where every input of the workbench lives.
+
+The workbench never assumes a fixed shape of the design. It assumes only where the
+root of the workspace is, and from there it scans. Everything the board viewer and
+the artifact panels draw is a discovery result of this module, so a topology with 2,
+3, 8 or N dies renders without one line of the workbench knowing the number.
+
+The root is resolved by walking up from the starting directory until one is found that
+carries a ``workbench.json`` profile or the default root markers of
+:mod:`gui.model.profile`. An explicit root argument overrides the walk when somebody
+points the workbench at another workspace. The folder names themselves come from the
+workspace profile, so this module spells no host project identifier.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional
+
+from gui.model.profile import PROFILE_FILE, Profile, is_workspace_root, load_profile
+
+# Extension families the workbench knows how to open, and the label it shows for
+# each family. This is an input contract, not a whitelist: unknown files stay
+# selectable in the open dialogs, they simply carry no kind hint.
+TOPOLOGY_SUFFIXES = (".json",)
+# The topology canvas also reads and writes YAML documents. The scan keeps to the JSON
+# family on purpose: the other modules that consume a topology file read JSON only.
+YAML_SUFFIXES = (".yaml", ".yml")
+TOPOLOGY_DOCUMENT_SUFFIXES = TOPOLOGY_SUFFIXES + YAML_SUFFIXES
+DATASET_SUFFIXES = (".json", ".jsonl", ".txt")
+HDL_SUFFIXES = (".sv", ".v")
+LAYOUT_SUFFIXES = (".gds", ".lef", ".def")
+FORMAL_SUFFIXES = (".smt2", ".smt", ".sdc")
+GRAMMAR_SUFFIXES = (".gf",)
+SCRIPT_SUFFIXES = (".py",)
+
+
+def discover_workspace(start: Optional[Path] = None) -> Path:
+    """Return the workspace root, or the nearest ancestor that looks like one.
+
+    :param start: directory to start walking from; defaults to the package folder.
+    :return: absolute path of the workspace root.
+    :raises FileNotFoundError: when no ancestor carries a profile file or the root markers.
+    """
+    candidate = (start or Path(__file__).resolve()).expanduser().resolve()
+    if candidate.is_file():
+        candidate = candidate.parent
+    for anchor in [candidate, *candidate.parents]:
+        if is_workspace_root(anchor):
+            return anchor
+    raise FileNotFoundError(
+        f"no workspace found at or above {candidate}: it needs a {PROFILE_FILE} file "
+        "or the default root markers"
+    )
+
+
+def open_workspace(start: Optional[Path] = None) -> "Workspace":
+    """Convenience wrapper: discover the root and hand back a scanned Workspace."""
+    return Workspace(discover_workspace(start))
+
+
+@dataclass
+class Artifact:
+    """One discovered file, with the role the workbench assigns to its location."""
+
+    path: Path
+    role: str
+    suffix: str
+    size_bytes: int
+    modified_utc: str
+
+    @property
+    def name(self) -> str:
+        return self.path.name
+
+    def as_row(self) -> List[str]:
+        """Return the four column strings the artifact table shows."""
+        return [
+            self.role,
+            self.path.name,
+            f"{self.size_bytes:,}",
+            self.modified_utc,
+        ]
+
+
+def _artifact(path: Path, role: str) -> Artifact:
+    stamp = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    return Artifact(
+        path=path,
+        role=role,
+        suffix=path.suffix.lower(),
+        size_bytes=path.stat().st_size,
+        modified_utc=stamp.strftime("%Y-%m-%d %H:%M:%SZ"),
+    )
+
+
+@dataclass
+class Workspace:
+    """Scans one workspace and caches the discovery result until told otherwise.
+
+    The folder layout comes from the workspace profile: the built in defaults, with the
+    ``workbench.json`` of the root merged over them when the file exists.
+    """
+
+    root: Path
+    profile: Optional[Profile] = field(default=None, repr=False)
+    _scan: Optional[Dict[str, List[Artifact]]] = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        self.root = Path(self.root)
+        if self.profile is None:
+            self.profile = load_profile(self.root)
+
+    def _dir(self, key: str) -> Path:
+        assert self.profile is not None
+        return self.root / self.profile.directory(key)
+
+    # --- anchors, resolved through the profile ---------------------------------
+    @property
+    def config_dir(self) -> Path:
+        return self._dir("config")
+
+    @property
+    def topologies_dir(self) -> Path:
+        return self._dir("topologies")
+
+    @property
+    def datasets_dir(self) -> Path:
+        return self._dir("datasets")
+
+    @property
+    def artifacts_dir(self) -> Path:
+        """Exported production tree, ignored by git and regenerated by the export."""
+        return self._dir("artifacts")
+
+    @property
+    def factory_dir(self) -> Path:
+        return self.artifacts_dir / "factory"
+
+    @property
+    def visualization_dir(self) -> Path:
+        return self.artifacts_dir / "visualization_board"
+
+    @property
+    def asic_dir(self) -> Path:
+        """Folder of the hardware sources, the one the profile calls ``hardware``."""
+        return self._dir("hardware")
+
+    @property
+    def rtl_dir(self) -> Path:
+        return self._dir("rtl")
+
+    @property
+    def sim_dir(self) -> Path:
+        return self._dir("sim")
+
+    @property
+    def reports_dir(self) -> Path:
+        return self.factory_dir / "reports"
+
+    @property
+    def runtime_state_dir(self) -> Path:
+        return self._dir("runtime_state")
+
+    @property
+    def src_dir(self) -> Path:
+        return self._dir("sources")
+
+    @property
+    def makefile(self) -> Path:
+        """Make file the profile names, or the hardware folder when it names none."""
+        assert self.profile is not None
+        return self.root / self.profile.makefile if self.profile.makefile else self.asic_dir
+
+    def relative(self, path: Path) -> str:
+        """Return a path shortened against the workspace root for display."""
+        try:
+            return str(path.relative_to(self.root))
+        except ValueError:
+            return str(path)
+
+    # --- scans -----------------------------------------------------------------
+    def rescan(self) -> Dict[str, List[Artifact]]:
+        """Walk the workspace once and rebuild the whole discovery result."""
+        found: Dict[str, List[Artifact]] = {
+            "topology": [],
+            "board": [],
+            "netlist": [],
+            "gds": [],
+            "lef": [],
+            "def": [],
+            "sdc": [],
+            "report": [],
+            "rtl": [],
+            "testbench": [],
+            "grammar": [],
+            "formal": [],
+            "transcript": [],
+            "dataset": [],
+            "corpus": [],
+            "vcd": [],
+        }
+        for directory, role in (
+            (self.config_dir, "topology"),
+            (self.topologies_dir, "topology"),
+        ):
+            found[role] += self._collect(directory, TOPOLOGY_SUFFIXES, role, depth=3)
+
+        found["board"] += self._collect(
+            self.visualization_dir / "system_board", HDL_SUFFIXES, "board", depth=2
+        )
+        found["netlist"] += self._collect(
+            self.visualization_dir / "netlists", (".v", ".nl"), "netlist", depth=2
+        )
+        found["gds"] += self._collect(self.factory_dir / "gds", (".gds",), "gds", depth=2)
+        found["lef"] += self._collect(self.factory_dir / "lef", (".lef",), "lef", depth=2)
+        found["def"] += self._collect(self.factory_dir / "def", (".def",), "def", depth=2)
+        found["sdc"] += self._collect(self.factory_dir / "sdc", (".sdc",), "sdc", depth=2)
+        found["report"] += self._collect(
+            self.reports_dir, (".rpt", ".json", ".xml"), "report", depth=2
+        )
+        found["rtl"] += self._collect(self.rtl_dir, HDL_SUFFIXES, "rtl", depth=3)
+        found["testbench"] += self._collect(self.sim_dir, HDL_SUFFIXES, "testbench", depth=2)
+        found["vcd"] += self._collect(self.sim_dir, (".vcd",), "vcd", depth=2)
+        found["grammar"] += self._collect(self.datasets_dir, GRAMMAR_SUFFIXES, "grammar", depth=3)
+        found["formal"] += self._collect(self.datasets_dir, FORMAL_SUFFIXES, "formal", depth=3)
+        found["dataset"] += self._collect(self.datasets_dir, DATASET_SUFFIXES, "dataset", depth=3)
+        found["corpus"] += self._collect(
+            self.datasets_dir / "multilingual" / "corpus", (".txt",), "corpus", depth=2
+        )
+        found["transcript"] += self._collect(
+            self.runtime_state_dir, TOPOLOGY_SUFFIXES, "transcript", depth=2
+        )
+
+        merged: Dict[str, List[Artifact]] = {}
+        for role, items in found.items():
+            unique: Dict[Path, Artifact] = {}
+            for item in items:
+                unique[item.path] = item
+            merged[role] = sorted(unique.values(), key=lambda a: str(a.path).lower())
+        self._scan = merged
+        return merged
+
+    @property
+    def scan(self) -> Dict[str, List[Artifact]]:
+        if self._scan is None:
+            return self.rescan()
+        return self._scan
+
+    def _collect(
+        self, directory: Path, suffixes: Iterable[str], role: str, depth: int
+    ) -> List[Artifact]:
+        """Collect files below ``directory`` up to ``depth`` levels, skipping venvs."""
+        if not directory.is_dir():
+            return []
+        wanted = tuple(s.lower() for s in suffixes)
+        out: List[Artifact] = []
+        for path in directory.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.suffix.lower() not in wanted:
+                continue
+            relative_parts = path.relative_to(directory).parts
+            if len(relative_parts) > depth:
+                continue
+            if any(
+                part.startswith(".venv") or part in ("site-packages", "__pycache__", ".git")
+                for part in relative_parts
+            ):
+                continue
+            try:
+                out.append(_artifact(path, role))
+            except OSError:
+                continue
+        return out
+
+    def of_role(self, role: str) -> List[Artifact]:
+        return list(self.scan.get(role, []))
+
+    def newest(self, role: str, name_hint: str = "") -> Optional[Artifact]:
+        """Return the newest artifact of a role, optionally filtered by name part."""
+        items = [
+            a for a in self.of_role(role) if name_hint.lower() in a.path.name.lower()
+        ]
+        if not items:
+            return None
+        return max(items, key=lambda a: a.path.stat().st_mtime)
+
+    def role_summary(self) -> List[List[str]]:
+        """Rows for the artifact panel: role, count, newest path."""
+        rows: List[List[str]] = []
+        for role in sorted(self.scan):
+            items = self.scan[role]
+            newest = self.newest(role)
+            rows.append(
+                [role, str(len(items)), self.relative(newest.path) if newest else "-"]
+            )
+        return rows
+
+    # --- runtime documents -----------------------------------------------------
+    # The export manifest of this tree is a document, so the model layer reads it:
+    # see gui.model.exportdoc.load_manifest, which is the one manifest reader of the
+    # workbench. The workspace stays a filesystem scanner.

@@ -447,6 +447,10 @@ separates executed from declared claim by claim.
   - `httpx >= 0.24.0` - client of the federated HTTP transport of section 13.5, used only when a node
     declares `"transport": "http"`
   - `pytest >= 8.0.0`
+  - `tomli >= 2.0.0`, marked `python_version < "3.11"` - the reader of `pyproject.toml` used by
+    `tests/test_workbench_isolation.py`. `tomllib` is standard library from 3.11 on, and the declared
+    floor of this project is 3.10, so on that interpreter the gate imports `tomli` instead; on 3.11 and
+    newer the marker resolves away and nothing is installed
 - The federated Git transport of section 13.5 shells out to `git`, an external program that must be on
   the `PATH` for a node declaring `"transport": "git"`; no other Python package is involved.
 - Optional, used only when publishing: `huggingface_hub >= 0.23.0`, installed with
@@ -501,6 +505,8 @@ Execute all unit and integration tests locally:
 pytest -v tests/
 ```
 The repository includes `.github/workflows/ci.yml` running pytest and the synthesis pipeline on GitHub Actions across Python versions 3.10, 3.11, and 3.12.
+That floor is the reason the isolation gate has two readers: `tomllib` is standard library only from 3.11 on, and the gate parses `pyproject.toml` on every interpreter in the matrix, so it falls back to `tomli` under the marker `python_version < "3.11"`.
+Section 16.6 records the other thing that matrix needs, the native libraries Qt loads on Linux and the `QT_QPA_PLATFORM=offscreen` the workbench tests run under.
 
 ### 2.4 The `datasets/multilingual/` Companion Folder and its Release
 
@@ -545,7 +551,7 @@ in `asic_chip/Makefile` and in `sim/sim_main.cpp` are relative to it.
 | --- | --- | --- | --- |
 | regenerate the generated RTL, both vector tables and the manifest | `python asic_chip/scripts/lingologos_compiler.py` | CPython, standard library only | EXECUTED, `FINAL VERDICT: PASS` |
 | prove the checked in files are the current ones | `python asic_chip/scripts/lingologos_compiler.py --check` | same | EXECUTED, adds the `RTL_matches_artifacts` gate |
-| run the gate suite required by `AGENTS.md` | `pytest -v tests/` | pytest | EXECUTED, 208 passed |
+| run the gate suite required by `AGENTS.md` | `pytest -v tests/` | pytest | EXECUTED, 448 passed, 1 skipped |
 | lint and infer latches | `verilator --lint-only ... -DLL_DEBUG_PORTS --top-module lingologos_top` | Verilator 5.006 or later | EXECUTED in the image `verilator/verilator:latest`, Verilator 5.054, through `make -f asic_chip/Makefile lint`: exit 0, no warning left. NOT RUN on the host, where there is no Verilator and no `make` |
 | replay the 304 golden rows against Verilog | `verilator --cc --exe --build ... sim/sim_main.cpp` | Verilator and a C++ compiler | EXECUTED in that image, through `make -f asic_chip/Makefile sim-verilator`: 304 rows plus the core self test, 0 mismatches, `FINAL VERDICT: PASS`, 91 clock cycles for the self test, VCD written |
 | run the SystemVerilog testbench | `verilator --binary --timing ...` | Verilator | EXECUTED in that image, through `make -f asic_chip/Makefile sim-tb`: same checks, same verdict |
@@ -768,7 +774,7 @@ To maintain high engineering and academic standards:
 9. **No electrical characterization.** Absolute maximum ratings, supply current ranges and junction temperature limits are not characterized, and the package entry in `asic_chip/config.json` is a declared body chosen to fit 146 signal bits plus the declared power pins, not a purchased part.
 
 ### 4.5 Coverage of the Test Suite
-`tests/` (208 tests collected, 182 of them outside the two ASIC files of section 1.10) locks,
+`tests/` (449 tests collected, 423 of them outside the two ASIC files of section 1.10) locks,
 in particular: the distribution invariant for the parser and for the
 extracted grammar; inside vs Viterbi agreement; post-pruning renormalization against
 `probability_pre_pruning`; disjoint train/test split; the corrected semantics of
@@ -1225,3 +1231,82 @@ matters when the flag is evaluated against topologies and datasets.
   algebra over the tokenizer ids. The `lllayer` engine consumes neither `artifacts/grammar.json` nor
   the tokenizer, so the `lllayer_masker` kernel is a separate, smaller mechanism that a future change
   is expected to fold into that automaton.
+
+---
+
+## 16. Desktop Workbench (`src/gui`)
+
+The workbench is an optional PyQt6 desktop application over a checkout. It is a viewer and a launcher: it reads files from the workspace, it starts commands as separate processes, and it never imports the project it sits in. It loads no web resource (no CDN, no remote font or icon, no embedded browser); the style sheet is a local string and the icons are the standard pixmaps of the Qt style.
+
+### 16.1 Modules
+
+One tab of the shell window per module:
+
+1. **Topology canvas** (`views/canvas.py`, `model/topology.py`): a generic node graph on `QGraphicsScene`. A node is an identifier, a kind string, a port stack and attributes, all taken from the input document, from the shape of a mixed dataset or from the user. Links are Bezier curves, and validation reports cycles and isolated nodes.
+2. **Lllayer** (`views/lllayer.py`, `model/stream.py`, `workers/session.py`): model assignment per node, transcript replay with the recorded pacing, and live sessions through a command.
+3. **Board viewer** (`views/hardware.py`, `model/hardware.py`, `model/exportdoc.py`): the schematic is derived from the files found in the workspace, so a board with N dies renders without the interface knowing N.
+4. **Dataset manager** (`views/dataset.py`, `model/dataset.py`): paged `QTableView` over `.json`, `.jsonl` and `.txt` payloads.
+5. **SystemVerilog analyzer** (`views/sv.py`, `model/svdoc.py`): symbols, mesh masks, tasks, verdict lines, and the Verilator hand off.
+
+The layers are strict. `model/` is Qt free and holds every parser. `workers/` is the only place that drives threads. `views/` holds the widgets. `paths.py` scans the workspace and assigns each file the role of its location.
+
+### 16.2 Closed package rule
+
+Let `G` be the set of modules under `src/gui` and `P` the set of every other module of the project. The workbench maintains two invariants:
+
+- no module of `P` imports a module of `G`;
+- no module of `G` imports a module of `P`, at module level or inside a function, and none edits `sys.path` or imports dynamically except relative to its own package (`views/__init__.py` loads its panels lazily that way).
+
+The project is reached only through files read and commands launched. The names of the host project (`lingologos_orchestrator`, `asic_chip`, the engine package) may appear in code string literals only inside `model/profile.py`; docstrings and comments may still describe the project. `tests/test_workbench_isolation.py` checks all of it from the syntax trees.
+
+### 16.3 Workspace profile
+
+`model/profile.py` is the single place that names the host project. A profile is a mapping; the built in defaults describe this repository, and an optional `workbench.json` at the workspace root is merged over them.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `name` | `lingologos` | Label shown in the console. |
+| `directories` | see below | Folders relative to the root. Keys: `config`, `topologies`, `datasets`, `artifacts`, `hardware`, `rtl`, `sim`, `runtime_state`, `sources`. A key left out keeps its default. |
+| `session_module` | `lingologos_orchestrator.cli` | Module run with `python -m` for a live session. Empty: no live session. |
+| `session_python_path` | `["src"]` | Folders put first on `PYTHONPATH` for that session. |
+| `export_script` | `asic_chip/scripts/export_artifacts.py` | Script behind the export button. Empty: export unavailable. |
+| `openlane_runs` | `asic_chip/openlane/runs` | Folder where OpenLane run directories are searched. |
+| `makefile` | `asic_chip/Makefile` | Make file behind the make targets. Empty: make plans unavailable. |
+| `simulation_cwd` | `asic_chip` | Working directory of a direct Verilator run. Empty: the workspace root. |
+| `verilator_objdir` | `asic_chip/sim/obj_dir_tb` | Object directory of a direct Verilator run. |
+| `make_targets` | four targets | Target name to label, for the target list. |
+
+Default `directories`: `config` is `config`, `topologies` is `topologies`, `datasets` is `datasets`, `artifacts` is `export_artifacts`, `hardware` is `asic_chip`, `rtl` is `asic_chip/rtl`, `sim` is `asic_chip/sim`, `runtime_state` is `runtime_state`, `sources` is `src`.
+
+Rules:
+
+- **Discovery**: a directory is a workspace root when it holds `workbench.json`, or both `pyproject.toml` and `src`. The scan of section 4 of the interface contract (`factory/`, `visualization_board/` and their subfolders under the `artifacts` folder) is fixed.
+- **Switching off**: an empty string for a command or a script disables the feature. The plan stays visible, `available` is false and the reason names `workbench.json`.
+- **Failure**: a file that cannot be read, is not an object, or carries a wrong type or an unknown key never stops the workbench. The defaults stay in force for what could not be used, and each reason is printed to the console as a warning at start up.
+
+### 16.4 YAML topology documents
+
+`load_graph_file` and `save_graph` choose JSON or YAML by suffix (`.json`, `.yaml`, `.yml`); the dialect is still detected from the document shape. The top level must be a mapping. PyYAML is imported inside the function that needs it, so JSON sessions never require it; without it a YAML document fails with a message that names `pip install PyYAML`. The workspace scan keeps to the JSON family on purpose, since the other modules that consume a topology file read JSON only; the canvas dialogs and the file drop route accept YAML.
+
+### 16.5 Source panel parse requests
+
+Each `load_path` call of the SystemVerilog panel takes a serial number, and a parse result is applied only if its serial is still the newest. Two consequences: a slow older parse cannot overwrite a newer request, and the automatic first load that follows a workspace scan runs only when nothing was ever requested, so it cannot overtake a file the user already chose.
+
+### 16.6 Tests
+
+`tests/test_workbench_*.py` run headless with `QT_QPA_PLATFORM=offscreen`, which the GUI test modules set themselves before importing Qt and which `.github/workflows/ci.yml` also sets for the whole job. On Linux the Qt wheels need native libraries that a bare runner does not carry (`libegl1`, `libgl1`, `libglib2.0-0`, `libfontconfig1`, `libxkbcommon-x11-0`, the `libxcb-*` pieces), so the pipeline installs them in a step before the dependencies: without them importing `PyQt6.QtWidgets` fails with `libEGL.so.1: cannot open shared object file`. A host that still cannot load Qt must not abort the gate: the modules that build widgets (`test_workbench_shell.py`, `test_workbench_layout.py`) wrap their Qt imports in a module level `pytest.skip` naming the failure, and the two modules that need Qt only at one point (`test_workbench_paths.py`, `test_workbench_offline_guard.py`) ask for `gui.app` and `gui.theme` inside the tests that use them, so the filesystem tests and every source scan of the offline gate run even where Qt is unusable.
+`test_workbench_profile.py` covers the profile (defaults, overrides, switched off features, bad files, discovery) and YAML topologies; `test_workbench_isolation.py` covers section 16.2; `test_workbench_shell.py` covers the five modules, their routes and the parse request rule; `test_workbench_layout.py` covers section 16.7.
+
+### 16.7 Liquid panels, node cards and view navigation
+
+The room a module shows is shared out, never fixed by a `setFixedHeight`.
+
+**Folding cards.** `widgets.Card` (`src/gui/widgets.py`) is an accordion. Its body is a single container widget (`_shell`) held by a `QVBoxLayout` of the group box, so `set_expanded(False)` hides the whole body, body widgets, nested layouts and anything added afterwards, leaves the card at `CLOSED_HEIGHT` (30 px, title bar only), sets the `folded` dynamic property the style sheet polishes on, turns the native style arrow of `fold` from down to right, emits `toggled(bool)` and calls `updateGeometry()`. A click on the title band (`title_zone()`) toggles as well as the button; `set_body_stretch(row, factor)` lets one body row absorb the height the card is given. `widgets.share_column(layout, card, weight)` adds a card to a column with a stretch factor and rewires that factor to `0` while the card is folded, which is how the height of a closed card reaches the cards left open. The canvas side column, the Lllayer side column, the payload editor card and the right column of the hardware module use it; the `setFixedHeight` and `setMaximumHeight` caps those columns carried are gone, replaced by minimums and body stretch.
+
+**Measured node cards.** `views/canvas.py` sizes a card from its own content: `NodeItem.content_height()` is `HEADER_HEIGHT` (26) + `LABEL_BAND` (22) + `port_row_count() * PORT_ROW` (19) + `footer_height()` (`FOOTER_BAND` 16 plus 4 px when the node carries attributes or a validation flag, 6 px when it carries neither), and `content_width()` clamps the widest title, label or port name to `NODE_WIDTH` (208) up to `NODE_MAX_WIDTH` (264). `boundingRect()` returns exactly that, so the header band that holds the title, the label band, the port rows and the footer never overlap; `port_anchor` places a port on its own row. Text is elided by `_fit_text` and the whole value goes to the tool tip. `TopologyScene.node_anchor`, `_free_spot` and `apply_layout` read the measured width and height, `CARD_STEP_X` (300) and `CARD_STEP_Y` (190) keep the grid open, and `model/topology.auto_layout(graph, ..., heights=...)` pushes the cards under a tall one down by `height + 30`.
+
+**Canvas zoom.** `TopologyView` keeps `fit()` as the view the module opens with and adds `zoom_level()`, `apply_zoom(factor)`, `zoom_in`, `zoom_out`, the `zoom_changed(float)` signal, Ctrl with the wheel and Ctrl plus the plus and minus keys, clamped to `MIN_SCALE` 0.1 and `MAX_SCALE` 12.0. `CanvasPanel` shows Zoom out, Zoom in and the `zoom N pct` chip in its tool row.
+
+**Schematic zoom and walking.** `views/hardware.py` `SchematicView` draws into a virtual area of `VIRTUAL_W` x `VIRTUAL_H` (1240 x 820) and places it with `_refresh_transform()`: translate to the centre of the usable band (`_usable()`, the widget below its `HEADER_BAND` of 30 px) plus the pan offset, scale by `_fit_scale() * zoom`, translate back by half the virtual size. With `zoom` 1.0 and no pan that is the letterboxed fit the widget always had, pixel for pixel. `die_rects()` arranges the blocks in `ceil(sqrt(n))` columns and grows the virtual area when the blocks would fall under `MIN_DIE_W` x `MIN_DIE_H` (250 x 190), never past `MAX_DIE_W` x `MAX_DIE_H` (340 x 236), so a board of forty dies still shows readable blocks at the default fit. The band above the drawing is painted in device space and repeats the zoom. `set_zoom(value, anchor)` keeps the point under the cursor still, `zoom_in`, `zoom_out`, `reset_view`, the wheel, `+`, `-`, `0`, `pan_by`, the arrow keys, `center_on` and `focus_die` cover the rest, and every change of `_pan`, `_zoom` or `_virtual` calls `_refresh_transform()` so `_pick` tests the transform that is really on screen. Pens and fonts are level of detail aware: `_line_width` never sends a pen under a hairline and `_readable_font` never leaves text below `MIN_TEXT_PT` (6.5 pt) on screen. `HardwarePanel` puts Zoom out, Zoom in, Fit board and Center selected die, with the `zoom N pct` and `canvas W x H` chips, in the strip above the drawing.
+
+`tests/test_workbench_layout.py` locks the fold and the column share, the reserved bands and the width clamp of a node card, the layout step of a tall card, the unchanged default fit of both views, the zoom clamps and the hit test after a zoom and a pan.
