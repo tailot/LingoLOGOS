@@ -58,7 +58,7 @@ src/neuro_symbolic/
 
 ### 1.3 `trainer.py` - Training and Optimization
 - **Dyck-2 Generator and Phrase-Level Split**:
-  `DyckDataset` generates balanced sentences over parentheses `()` and brackets `[]` with bounded recursion depth and de-duplicated samples. `split(test_fraction=0.25, seed=42)` returns **disjoint sentence sets** (no shared string between train and test), so hold-out metrics are not contaminated by memorization.
+  `DyckDataset` generates balanced sentences over parentheses `()` and brackets `[]` with bounded recursion depth and de-duplicated samples. The generator draws from its own `random.Random(seed)` instance instead of reseeding the module level generator, so the corpus of a run is fixed by its own seed and cannot be perturbed by whatever else consumed or seeded global randomness. `split(test_fraction=0.25, seed=42)` returns **disjoint sentence sets** (no shared string between train and test), so hold-out metrics are not contaminated by memorization.
 - **Regularized Objective** (mixture entropy, consistent with the joint gate of §1.1):
   $$\mathcal{L}(\theta) = -\frac{1}{|D|} \sum_{X \in D} \log P(S \stackrel{*}{\Rightarrow} X \mid \theta) + \lambda_1 \sum_{A \in V_N} H(A) + \lambda_2 \|\theta\|_2^2$$
   $$H(A) = H_b(\pi_A) + \pi_A\, H\!\left(P(A \to \cdot\,\cdot)\right) + (1-\pi_A)\, H\!\left(P(A \to \cdot)\right)$$
@@ -67,7 +67,7 @@ src/neuro_symbolic/
 - **Validation Metrics** (returned by `evaluate()`):
   | Key | Definition |
   | :--- | :--- |
-  | `mean_nll_per_symbol` | $-\frac{1}{N}\sum_X \log P(S \Rightarrow^\ast X)$, $N$ = total symbols. |
+  | `mean_nll_per_symbol` | $-\frac{1}{N}\sum_X \log P(S \Rightarrow^\ast X)$, summed over the sentences the parser can derive, with $N$ = total symbols of those sentences. A sentence with no derivation contributes neither a log-probability nor symbols to the denominator, so the average stays well defined when `model_coverage` is below 1.0 instead of being diluted by a floor value. |
   | `ppl_per_symbol` | $\exp(\text{mean\_nll\_per\_symbol})$: **marginal** perplexity per symbol. It is *not* an autoregressive conditional perplexity ($P(x_i \mid x_{<i})$ is not available from a chart parser), and cross-entropy on a corpus has no upper bound — so no closed-form PPL cap may be asserted. |
   | `model_coverage` | Fraction of sentences with non-zero inside probability (a *dense* PCFG gets 1.0 on any bracket string, so this measures nothing about selectivity). |
   | `rule_sparsity` | Fraction of the $K^3 + K|V_T|$ possible productions with mass below $10^{-4}$. |
@@ -551,7 +551,7 @@ in `asic_chip/Makefile` and in `sim/sim_main.cpp` are relative to it.
 | --- | --- | --- | --- |
 | regenerate the generated RTL, both vector tables and the manifest | `python asic_chip/scripts/lingologos_compiler.py` | CPython, standard library only | EXECUTED, `FINAL VERDICT: PASS` |
 | prove the checked in files are the current ones | `python asic_chip/scripts/lingologos_compiler.py --check` | same | EXECUTED, adds the `RTL_matches_artifacts` gate |
-| run the gate suite required by `AGENTS.md` | `pytest -v tests/` | pytest | EXECUTED, 448 passed, 1 skipped |
+| run the gate suite required by `AGENTS.md` | `pytest -v tests/` | pytest | EXECUTED, 464 passed, 10 skipped |
 | lint and infer latches | `verilator --lint-only ... -DLL_DEBUG_PORTS --top-module lingologos_top` | Verilator 5.006 or later | EXECUTED in the image `verilator/verilator:latest`, Verilator 5.054, through `make -f asic_chip/Makefile lint`: exit 0, no warning left. NOT RUN on the host, where there is no Verilator and no `make` |
 | replay the 304 golden rows against Verilog | `verilator --cc --exe --build ... sim/sim_main.cpp` | Verilator and a C++ compiler | EXECUTED in that image, through `make -f asic_chip/Makefile sim-verilator`: 304 rows plus the core self test, 0 mismatches, `FINAL VERDICT: PASS`, 91 clock cycles for the self test, VCD written |
 | run the SystemVerilog testbench | `verilator --binary --timing ...` | Verilator | EXECUTED in that image, through `make -f asic_chip/Makefile sim-tb`: same checks, same verdict |
@@ -775,7 +775,7 @@ To maintain high engineering and academic standards:
 9. **No electrical characterization.** Absolute maximum ratings, supply current ranges and junction temperature limits are not characterized, and the package entry in `asic_chip/config.json` is a declared body chosen to fit 146 signal bits plus the declared power pins, not a purchased part.
 
 ### 4.5 Coverage of the Test Suite
-`tests/` (473 tests collected, 447 of them outside the two ASIC files of section 1.10) locks,
+`tests/` (474 tests collected, 448 of them outside the two ASIC files of section 1.10) locks,
 in particular: the distribution invariant for the parser and for the
 extracted grammar; inside vs Viterbi agreement; post-pruning renormalization against
 `probability_pre_pruning`; disjoint train/test split; the corrected semantics of
@@ -900,6 +900,7 @@ The orchestrator evaluates termination condition $\mathcal{C}$ at each turn $k$:
 - **UNSAT Breaker**: If $\mathrm{Check}(\mathcal{T}_k) = \mathrm{unsat}$ and $\mathcal{C} \in \{\text{UNSAT\_BREAKER}, \text{Z3\_SAT\_CONVERGENCE\_OR\_UNSAT\_BREAKER}\}$, execution aborts immediately to prevent propagation of contradictory or safety-violating state transitions.
 - **SAT Convergence**: If $\mathrm{Check}(\mathcal{T}_k) = \mathrm{sat}$ continuously across all active edges $|E|$, consensus is certified and the session terminates successfully with `SAT_CONVERGENCE`.
 - **Turn Bound Exhaustion**: If $k = \text{maxTurns}$ is reached without convergence or breaker trip, the session halts with `MAX_TURNS_REACHED`.
+- **Session Transcript**: the `ExecutionResult` of the session is serialized to `runtime_state/<sessionId>_transcript.json`. The transcript is a governance artifact and not an optional debug dump, so a failure to write it (missing folder, permission error, or a record that cannot be serialized) is reported on stderr and the session still returns its result: the verdict of the run has already been computed and must not be lost because an auxiliary file could not be produced.
 
 ### 13.5 Federated Infrastructure and Universal Transport Resolver
 
@@ -916,12 +917,20 @@ federated node adds four fields to the topology entry: `transport`, `remote_sour
    shallow clone `git clone --branch <branch> --depth 1 <remote_source> <cache>` on first use, an
    incremental `git -C <cache> pull origin <branch>` afterwards. The specification is then read from
    `<cache>/<specs.ontology>`. Because the synchronization runs inside `validate_static`, a node
-   whose remote cannot be reached stops the session before a single turn is dispatched.
+   whose remote cannot be reached stops the session before a single turn is dispatched. Every git
+   invocation is bounded by `GIT_TIMEOUT_SECONDS` (120 seconds), and every transport failure -- a
+   timeout, a non zero exit of `git`, or a missing `git` executable -- is re-raised as
+   `OrchestratorError` with an English message naming the remote, instead of leaking a raw
+   `subprocess` traceback out of Phase 01.
 3. **HTTP Transport (`http`)**: the node is executed by `HttpNodeRunner`, which POSTs the input
    envelope to `endpoint_url` and parses the envelope of the response. When `auth_method` is
    `bearer_token` the request carries `Authorization: Bearer <token>`, and the token is read at
    Phase 02 from the environment variable named by `auth_token_env`; the token itself never appears
-   in a topology file. A failed request raises `OrchestratorError` and aborts the session.
+   in a topology file. A transport failure -- connection refused, an HTTP status outside the 2xx
+   range, or a response body that is not valid JSON -- raises `OrchestratorError` and aborts the
+   session. A reply that is valid JSON but violates the envelope schema keeps its
+   `SchemaValidationError` type instead: the remote node broke the protocol, which is a different
+   fault from an unreachable endpoint, and the session log reports the two cases differently.
 
 `NodeResolver.resolve` turns those fields into absolute paths: `grammar_path`, `ontology_path`,
 `seed_path`, and `node_dir`, the folder of the ontology that Phase 02 passes to the node process as
@@ -944,9 +953,13 @@ To scale beyond static $N$-node configurations:
 - **Centralized SMT Solver Pool (`SMTSolverPool`)**: Phase 01 queues one `SolverTask` per node
   ontology and dispatches them through `verify_batch`, so the ontology precheck of $N$ nodes runs on
   the pooled workers instead of sequentially. Each worker binds its verifier to a dedicated
-  `z3.Context()`: the implicit Z3 main context is shared process wide and is not safe to parse into
-  from several threads at once, which the isolation avoids. `run_session` shuts the pool down in a
-  `finally` block, so the worker threads never outlive the session.
+  `z3.Context()` and hands the solver the `timeout_ms` budget declared on the task (10000 ms by
+  default): the implicit Z3 main context is shared process wide and is not safe to parse into
+  from several threads at once, which the isolation avoids, and the budget keeps a pathological
+  assertion set from holding a worker -- and therefore a session turn -- forever, since the node
+  process timeout of section 13.3 only protects nodes that run as separate processes. A bounded
+  search that does not finish reports `unknown`, never a wrong verdict. `run_session` shuts the
+  pool down in a `finally` block, so the worker threads never outlive the session.
 
 ### 13.7 Model Consolidation
 

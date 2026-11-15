@@ -10,6 +10,7 @@ Implements the 4-phase lifecycle:
 
 import json
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
@@ -506,10 +507,15 @@ class MultiInstanceOrchestrator:
         return result
 
     def _write_session_log(self, result: ExecutionResult) -> None:
-        """Writes volatile session transcript to runtime_state directory."""
+        """Writes volatile session transcript to runtime_state directory.
+
+        The transcript is a governance artifact, so a failure to write it must be visible: it is
+        reported on stderr without aborting the session, because the execution result itself has
+        already been produced and returned to the caller.
+        """
         log_file = self.runtime_state_dir / f"{self.config.sessionId}_transcript.json"
         try:
-            with open(log_file, "w", encoding="utf-8") as f:
-                json.dump(result.to_dict(), f, indent=2)
-        except Exception:
-            pass
+            with open(log_file, "w", encoding="utf-8") as stream:
+                json.dump(result.to_dict(), stream, indent=2)
+        except OSError as exc:
+            print(f"[orchestrator] Session transcript could not be written to {log_file}: {exc}", file=sys.stderr)

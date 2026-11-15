@@ -3,6 +3,27 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Tuple, Optional, Dict, Any, List
 
+# Sentinel log-probability of an impossible span inside the CYK chart. A finite value keeps
+# logsumexp stable and lets the chart stay a plain dense tensor; UNPARSABLE_FLOOR is the
+# cutoff that separates a real log-likelihood from that sentinel (see GrammarTrainer.evaluate).
+CHART_IMPOSSIBLE = -1e9
+UNPARSABLE_FLOOR = -1e8
+
+# Temperature guard: dividing by a temperature that small would overflow the logits.
+MIN_TEMPERATURE = 1e-5
+
+
+def default_nt_labels(num_non_terminals: int) -> List[str]:
+    """Neutral non-terminal labels: index 0 always names the start symbol S."""
+    if num_non_terminals <= 0:
+        return []
+    return ["S"] + [f"NT_{index}" for index in range(1, num_non_terminals)]
+
+
+def effective_temperature(temperature: Optional[float], fallback: float) -> float:
+    """Resolve an optional temperature argument against the module default, with the guard."""
+    return max(temperature if temperature is not None else fallback, MIN_TEMPERATURE)
+
 
 class DifferentiableCYKParser(nn.Module):
     """
@@ -64,12 +85,11 @@ class DifferentiableCYKParser(nn.Module):
         Shape: [NT, NT, NT]
         Joint normalized form: P(A -> B C) = pi_A * softmax_{B,C}(rule_logits[A] / T).
         """
-        temp = temperature if temperature is not None else self.temperature
-        scaled_logits = self.rule_logits / max(temp, 1e-5)
+        temp = effective_temperature(temperature, self.temperature)
+        scaled_logits = self.rule_logits / temp
         # Normalization over all possible binary productions (B, C) for each A
-        log_rules = F.log_softmax(scaled_logits.view(self.num_nt, -1), dim=-1).view(
-            self.num_nt, self.num_nt, self.num_nt
-        )
+        flat = F.log_softmax(scaled_logits.view(self.num_nt, -1), dim=-1)
+        log_rules = flat.view(self.num_nt, self.num_nt, self.num_nt)
         # Bernoulli mass of the binary family (pi_A)
         log_binary_mass = F.logsigmoid(self.family_logits).view(self.num_nt, 1, 1)
         return log_rules + log_binary_mass
@@ -80,9 +100,8 @@ class DifferentiableCYKParser(nn.Module):
         Shape: [NT, Vocab]
         Joint normalized form: P(A -> a) = (1 - pi_A) * softmax_a(term_logits[A] / T).
         """
-        temp = temperature if temperature is not None else self.temperature
-        scaled_logits = self.term_logits / max(temp, 1e-5)
-        log_terms = F.log_softmax(scaled_logits, dim=-1)
+        temp = effective_temperature(temperature, self.temperature)
+        log_terms = F.log_softmax(self.term_logits / temp, dim=-1)
         # logsigmoid(-x) = log(1 - sigmoid(x)) = log(1 - pi_A)
         log_term_mass = F.logsigmoid(-self.family_logits).view(self.num_nt, 1)
         return log_terms + log_term_mass
@@ -157,16 +176,18 @@ class DifferentiableCYKParser(nn.Module):
         # Dimension 3: non-terminal NT
         chart = torch.full(
             (batch_size, seq_len, seq_len, self.num_nt),
-            fill_value=-1e9,
+            fill_value=CHART_IMPOSSIBLE,
             device=device,
             dtype=self.rule_logits.dtype,
         )
 
-        # 1. Base case: length 1
-        for i in range(seq_len):
-            tokens = x[:, i]  # [Batch]
-            for nt in range(self.num_nt):
-                chart[:, 0, i, nt] = log_terms[nt, tokens]
+        # 1. Base case: length 1. One gather over the terminal table replaces the
+        # per-position / per-non-terminal assignment loop: log_terms[:, x] has shape
+        # [NT, Batch, Seq_Len], the chart slice wants [Batch, Seq_Len, NT].
+        chart[:, 0, :, :] = log_terms[:, x].permute(1, 2, 0)
+
+        # View of the rule table broadcast over the batch, hoisted out of the CYK loops
+        log_rules_batch = log_rules.unsqueeze(0)
 
         # 2. Recursive step: lengths from 2 up to seq_len
         for length in range(2, seq_len + 1):
@@ -191,7 +212,7 @@ class DifferentiableCYKParser(nn.Module):
                     # Adds the log-probabilities of the rules [NT_A, NT_B, NT_C]
                     # Resulting shape: [Batch, NT_A]
                     combined = torch.logsumexp(
-                        pair_inside.unsqueeze(1) + log_rules.unsqueeze(0),
+                        pair_inside.unsqueeze(1) + log_rules_batch,
                         dim=(-2, -1),
                     )
                     split_logs.append(combined)
@@ -212,6 +233,7 @@ class DifferentiableCYKParser(nn.Module):
         tokens: List[int],
         nt_labels: Optional[List[str]] = None,
         vocab_labels: Optional[List[str]] = None,
+        temperature: Optional[float] = None,
     ) -> Tuple[Optional[Dict[str, Any]], float]:
         """
         Runs Viterbi CYK parsing (max instead of logsumexp) to extract the
@@ -221,27 +243,33 @@ class DifferentiableCYKParser(nn.Module):
         if seq_len == 0:
             return None, float("-inf")
 
-        log_rules = self.get_log_rules().detach().cpu()
-        log_terms = self.get_log_terms().detach().cpu()
+        log_rules = self.get_log_rules(temperature).detach().cpu()
+        log_terms = self.get_log_terms(temperature).detach().cpu()
 
-        # best_score[len_idx, i, nt]
-        best_score = torch.full(
-            (seq_len, seq_len, self.num_nt), fill_value=float("-inf")
-        )
-        # backpointer[len_idx, i, nt] = (k, B, C)
-        bp = {}
+        # The search touches every (span, split, A, B, C) candidate: reading the tables
+        # through scalar tensor indexing would allocate one tensor object per access, so
+        # the two tables and the chart are carried as plain Python float lists.
+        impossible = float("-inf")
+        rule_scores: List[List[List[float]]] = log_rules.tolist()
+        term_scores: List[List[float]] = log_terms.tolist()
+
+        # best_score[l_idx][i][nt]
+        best_score: List[List[List[float]]] = [
+            [[impossible] * self.num_nt for _ in range(seq_len)] for _ in range(seq_len)
+        ]
+        # backpointer[(l_idx, i, nt)] = (k, B, C) or the terminal leaf
+        bp: Dict[Tuple[int, int, int], Any] = {}
 
         if nt_labels is None:
-            nt_labels = [f"NT_{i}" if i > 0 else "S" for i in range(self.num_nt)]
+            nt_labels = default_nt_labels(self.num_nt)
         if vocab_labels is None:
-            vocab_labels = [str(t) for t in range(self.vocab_size)]
+            vocab_labels = [str(token) for token in range(self.vocab_size)]
 
         # Base case
-        for i in range(seq_len):
-            tok = tokens[i]
+        for i, token in enumerate(tokens):
             for nt in range(self.num_nt):
-                best_score[0, i, nt] = log_terms[nt, tok].item()
-                bp[(0, i, nt)] = ("terminal", vocab_labels[tok])
+                best_score[0][i][nt] = term_scores[nt][token]
+                bp[(0, i, nt)] = ("terminal", vocab_labels[token])
 
         # Recursive step
         for length in range(2, seq_len + 1):
@@ -249,36 +277,36 @@ class DifferentiableCYKParser(nn.Module):
             for i in range(seq_len - length + 1):
                 j = i + length - 1
                 for nt_a in range(self.num_nt):
-                    max_val = float("-inf")
+                    max_val = impossible
                     best_cand = None
+                    rules_for_a = rule_scores[nt_a]
 
                     for k in range(i, j):
                         left_len = k - i
                         right_len = j - (k + 1)
+                        left_span = best_score[left_len][i]
+                        right_span = best_score[right_len][k + 1]
                         for nt_b in range(self.num_nt):
-                            s_left = best_score[left_len, i, nt_b].item()
-                            if s_left == float("-inf"):
+                            s_left = left_span[nt_b]
+                            if s_left == impossible:
                                 continue
+                            rules_for_b = rules_for_a[nt_b]
                             for nt_c in range(self.num_nt):
-                                s_right = best_score[right_len, k + 1, nt_c].item()
-                                if s_right == float("-inf"):
+                                s_right = right_span[nt_c]
+                                if s_right == impossible:
                                     continue
-                                score = (
-                                    log_rules[nt_a, nt_b, nt_c].item()
-                                    + s_left
-                                    + s_right
-                                )
+                                score = rules_for_b[nt_c] + s_left + s_right
                                 if score > max_val:
                                     max_val = score
                                     best_cand = (k, left_len, right_len, nt_b, nt_c)
 
-                    best_score[l_idx, i, nt_a] = max_val
+                    best_score[l_idx][i][nt_a] = max_val
                     if best_cand is not None:
                         bp[(l_idx, i, nt_a)] = best_cand
 
-        root_score = best_score[seq_len - 1, 0, 0].item()
-        if root_score == float("-inf"):
-            return None, float("-inf")
+        root_score = best_score[seq_len - 1][0][0]
+        if root_score == impossible:
+            return None, impossible
 
         def build_tree(l_idx: int, i: int, nt: int) -> Dict[str, Any]:
             node_label = nt_labels[nt]

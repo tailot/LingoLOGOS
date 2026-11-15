@@ -31,14 +31,17 @@ class SMTSolverPool:
     def __init__(self, max_workers: int = 4):
         self.max_workers = max_workers
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+        self._released = False
 
     def verify_single(self, task: SolverTask) -> SMTVerificationResult:
         """Executes a single SMT verification task inside a dedicated Z3 context.
 
         Each worker thread parses the ontology of one node into its own solver context, so the
-        verifications of concurrent tasks never touch the shared Z3 main context.
+        verifications of concurrent tasks never touch the shared Z3 main context. The budget
+        declared on the task is handed to the solver, so a pathological assertion set reports
+        unknown instead of occupying a worker (and a session turn) indefinitely.
         """
-        verifier = Z3Verifier(smt_context=z3.Context())
+        verifier = Z3Verifier(smt_context=z3.Context(), timeout_ms=task.timeout_ms)
         return verifier.verify_constraints(
             constraints=task.constraints,
             ontology_smt2=task.ontology_smt2,
@@ -47,16 +50,16 @@ class SMTSolverPool:
     def verify_batch(self, tasks: List[SolverTask]) -> Dict[str, SMTVerificationResult]:
         """Dispatches a list of verification tasks across the worker pool concurrently."""
         futures = {
-            self.executor.submit(self.verify_single, t): t.task_id
-            for t in tasks
+            self.executor.submit(self.verify_single, task): task.task_id
+            for task in tasks
         }
         results: Dict[str, SMTVerificationResult] = {}
         for future in concurrent.futures.as_completed(futures):
-            t_id = futures[future]
+            task_id = futures[future]
             try:
-                results[t_id] = future.result()
+                results[task_id] = future.result()
             except Exception as exc:
-                results[t_id] = SMTVerificationResult(
+                results[task_id] = SMTVerificationResult(
                     status="error",
                     is_sat=False,
                     is_unsat=False,
@@ -67,8 +70,9 @@ class SMTSolverPool:
     def shutdown(self, wait: bool = True) -> None:
         """Shuts down the thread pool executor."""
         self.executor.shutdown(wait=wait)
+        self._released = True
 
     def is_shutdown(self) -> bool:
         """Reports whether the executor was released and no longer accepts verification tasks."""
-        return bool(getattr(self.executor, "_shutdown", False))
+        return self._released
 

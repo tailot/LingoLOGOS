@@ -147,9 +147,11 @@ class GrammarVerifier:
         if engine == "lark":
             return self._coverage_with_lark(sequences)
 
+        # The CYK index is built once and reused for every sentence of the corpus
+        index = self.grammar.cnf_index()
         failed: List[str] = []
         for s in sequences:
-            if self.grammar.derive(list(s)) is None:
+            if self.grammar.derive(list(s), index) is None:
                 failed.append(s)
         coverage = (len(sequences) - len(failed)) / max(len(sequences), 1)
         return coverage, failed
@@ -183,8 +185,9 @@ class GrammarVerifier:
         A value < 1.0 means the grammar generates out-of-language strings.
         """
         accepted_wrong: List[str] = []
+        index = self.grammar.cnf_index()
         for s in sequences:
-            if self.grammar.derive(list(s)) is not None:
+            if self.grammar.derive(list(s), index) is not None:
                 accepted_wrong.append(s)
         rejection_rate = (len(sequences) - len(accepted_wrong)) / max(len(sequences), 1)
         return rejection_rate, accepted_wrong
@@ -202,12 +205,14 @@ class GrammarVerifier:
         terminals = list(self.grammar.terminals)
         if not terminals:
             return None
+        # The CYK index is built once and shared by all the probed words
+        index = self.grammar.cnf_index()
         for length in range(1, max_length + 1):
             for combo in product(terminals, repeat=length):
                 word = list(combo)
                 if is_well_bracketed(word):
                     continue
-                tree = self.grammar.derive(word)
+                tree = self.grammar.derive(word, index)
                 if tree is not None:
                     return "".join(word), tree
         return None

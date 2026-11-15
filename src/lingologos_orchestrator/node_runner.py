@@ -115,7 +115,11 @@ class NodeProcessRunner:
             proc = subprocess.run(
                 cmd,
                 input=input_json_str,
+                # Explicit UTF-8: the envelope protocol is UTF-8 JSON regardless of the console
+                # code page of the parent process, which is not UTF-8 on default Windows setups
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 capture_output=True,
                 timeout=self.timeout_seconds,
                 cwd=str(self.workspace_dir),
@@ -182,11 +186,18 @@ class HttpNodeRunner:
         payload = input_envelope.to_dict()
         try:
             with httpx.Client(timeout=self.timeout_seconds) as client:
-                resp = client.post(self.endpoint_url, json=payload, headers=headers)
-                resp.raise_for_status()
-                data = resp.json()
-                return Envelope.from_dict(data)
-        except Exception as exc:
+                response = client.post(self.endpoint_url, json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+        except httpx.HTTPError as exc:
             raise OrchestratorError(
                 f"HTTP node '{self.node_id}' failed request to {self.endpoint_url}: {exc}"
             ) from exc
+        except ValueError as exc:
+            raise OrchestratorError(
+                f"HTTP node '{self.node_id}' replied with a body that is not valid JSON: {exc}"
+            ) from exc
+
+        # A malformed envelope is a protocol violation, not a transport failure, so it keeps
+        # its SchemaValidationError type instead of being flattened into a transport error
+        return Envelope.from_dict(data)

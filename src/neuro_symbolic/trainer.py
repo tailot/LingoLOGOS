@@ -1,12 +1,10 @@
-import random
 import math
-from typing import List, Tuple, Dict, Any, Optional
+import random
+from typing import List, Tuple, Dict, Optional
 import torch
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 
-from .parser import DifferentiableCYKParser
-from .grammar import PCFGrammar
+from .parser import DifferentiableCYKParser, UNPARSABLE_FLOOR
 
 
 class DyckDataset(Dataset):
@@ -37,14 +35,16 @@ class DyckDataset(Dataset):
     ) -> "DyckDataset":
         """
         Generates non-empty balanced Dyck-2 sentences of bounded even length.
+        The generator owns its random source: seeding the module level one would make the
+        corpus depend on whatever else happened to seed it before.
         """
-        random.seed(seed)
+        rng = random.Random(seed)
         samples_set = set()
 
         def gen_expr(depth: int) -> str:
-            if depth >= max_depth or random.random() < 0.3:
-                return "()" if random.random() < 0.5 else "[]"
-            choice = random.choice([0, 1, 2])
+            if depth >= max_depth or rng.random() < 0.3:
+                return "()" if rng.random() < 0.5 else "[]"
+            choice = rng.choice([0, 1, 2])
             if choice == 0:
                 inner = gen_expr(depth + 1)
                 return f"({inner})"
@@ -63,7 +63,7 @@ class DyckDataset(Dataset):
             if 2 <= len(s) <= max_length and len(s) % 2 == 0:
                 samples_set.add(s)
 
-        samples = [[cls.VOCAB_MAP[c] for c in s] for s in sorted(list(samples_set))]
+        samples = [[cls.VOCAB_MAP[c] for c in s] for s in sorted(samples_set)]
         return cls(samples)
 
     def split(
@@ -138,6 +138,21 @@ class GrammarTrainer:
         }
         return total_loss, metrics
 
+    def _clip_gradients_and_measure(self) -> float:
+        """
+        Clips the gradients to `max_grad_norm` when configured and returns their global
+        L2 norm measured after clipping, which is what the training log reports.
+        """
+        parameters = list(self.parser.parameters())
+        if self.max_grad_norm is not None:
+            torch.nn.utils.clip_grad_norm_(parameters, self.max_grad_norm)
+        squared_norm = sum(
+            parameter.grad.norm(2).item() ** 2
+            for parameter in parameters
+            if parameter.grad is not None
+        )
+        return math.sqrt(squared_norm)
+
     def train_epoch(self, dataset: DyckDataset, batch_size: int = 16) -> Dict[str, float]:
         self.parser.train()
         # Group by length to keep CYK batches homogeneous
@@ -149,9 +164,9 @@ class GrammarTrainer:
         nll_accum = 0.0
         ent_accum = 0.0
         batch_count = 0
-        grad_norms = []
+        grad_norms: List[float] = []
 
-        for length, s_list in samples_by_len.items():
+        for s_list in samples_by_len.values():
             for i in range(0, len(s_list), batch_size):
                 chunk = s_list[i : i + batch_size]
                 x = torch.tensor(chunk, dtype=torch.long)
@@ -160,18 +175,8 @@ class GrammarTrainer:
                 loss, metrics = self.compute_loss(x)
                 loss.backward()
 
-                if self.max_grad_norm is not None:
-                    torch.nn.utils.clip_grad_norm_(
-                        self.parser.parameters(), self.max_grad_norm
-                    )
-
-                # Monitor gradient stability
-                grad_norm = 0.0
-                for p in self.parser.parameters():
-                    if p.grad is not None:
-                        grad_norm += p.grad.norm(2).item() ** 2
-                grad_norms.append(math.sqrt(grad_norm))
-
+                # Monitor gradient stability, then step
+                grad_norms.append(self._clip_gradients_and_measure())
                 self.optimizer.step()
 
                 total_loss_accum += metrics["total_loss"]
@@ -220,10 +225,12 @@ class GrammarTrainer:
             for s in dataset.samples:
                 x = torch.tensor([s], dtype=torch.long)
                 lp = self.parser(x, temperature=self.temperature_tau).item()
-                if lp > -1e8:
+                if lp > UNPARSABLE_FLOOR:
+                    # A sentence the parser cannot derive contributes no log-probability,
+                    # so its symbols must not enter the per-symbol average either
                     total_log_prob += lp
+                    total_symbols += len(s)
                     parsable += 1
-                total_symbols += len(s)
 
         # Information-theoretic cost per symbol: -(1/N) * sum_X log P(S =>* X)
         mean_nll_per_symbol = -total_log_prob / max(total_symbols, 1)

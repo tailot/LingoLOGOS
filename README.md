@@ -366,7 +366,7 @@ $$A \to a:\ \delta = e(a),\ m = e(a) \qquad A \to B\,C:\ \delta = \delta_B + \de
 | **Selectivity (negative controls)** | `verify_negative_controls` | 100% rejection of 200 non-Dyck strings | **PASS (200/200)** |
 | **Rule induction quality** | `gold_rule_f1` | $F_1 \ge 0.90$ under NT alignment | **PASS (1.000)** |
 | **Language inclusion** | Z3 SMT Solver | **UNSAT** on certificate $+ \neg G$ | **PASS (UNSAT)** |
-| **Unit / integration tests** | pytest | All tests PASSED | **PASS (448 passed, 1 skipped)** |
+| **Unit / integration tests** | pytest | All tests PASSED | **PASS (464 passed, 10 skipped)** |
 
 ---
 
@@ -814,7 +814,7 @@ refuses to start a place and route until `--check` passes, which is what keeps a
 
 ### 12.3 Verification status, executed against not run
 
-`python -m pytest -v tests/` in this checkout: **472 passed, 1 skipped**, zero failures, zero errors; the synthesis that `tests/test_grammar_artifacts.py` performs once per session accounts for about 16 s of that wall time.
+`python -m pytest -v tests/` in this checkout: **464 passed, 10 skipped**, zero failures, zero errors. The ten skips are optional extras and checkpoint folders that `.gitignore` keeps out of the index, so they skip on a fresh clone as well. The synthesis that `tests/test_grammar_artifacts.py` performs once per session accounts for about 15 s of that wall time.
 Twenty six of those tests target the ASIC tree: twenty in `tests/test_asic_compiler.py`
 and six in `tests/test_asic_core_firmware.py`, plus the helper model in
 `tests/asic_reference_model.py` that recomputes the dot product, the GF field, the clause

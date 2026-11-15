@@ -38,15 +38,33 @@ class Z3Verifier:
     SORT_PATTERN = re.compile(r"^\s*\(\s*declare-sort\s+([A-Za-z0-9_!@$%^&*+=<>.?-]+)", re.IGNORECASE)
     CONST_PATTERN = re.compile(r"^\s*\(\s*declare-const\s+([A-Za-z0-9_!@$%^&*+=<>.?-]+)", re.IGNORECASE)
     FUN_PATTERN = re.compile(r"^\s*\(\s*declare-fun\s+([A-Za-z0-9_!@$%^&*+=<>.?-]+)", re.IGNORECASE)
+    DECLARATION_PATTERNS = (SORT_PATTERN, CONST_PATTERN, FUN_PATTERN)
 
-    def __init__(self, smt_context: Optional["z3.Context"] = None):
+    #: Default verification budget in milliseconds; None leaves Z3 unconstrained.
+    DEFAULT_TIMEOUT_MS: Optional[int] = 10_000
+
+    def __init__(self, smt_context: Optional["z3.Context"] = None, timeout_ms: Optional[int] = None):
         """Creates a verifier, optionally bound to a dedicated Z3 context.
 
         The implicit Z3 main context is shared process wide and is not safe to parse into from
         several threads at the same time. A pooled verification worker therefore gets its own
         context, which keeps concurrent ontology checks of different nodes fully isolated.
+
+        `timeout_ms` bounds the satisfiability search: without a budget a pathological set of
+        assertions can hold a turn of the session forever, because the node process timeout only
+        protects nodes that run as separate processes.
         """
         self.smt_context = smt_context
+        self.timeout_ms = self.DEFAULT_TIMEOUT_MS if timeout_ms is None else timeout_ms
+
+    @classmethod
+    def _declared_name(cls, line: str) -> Optional[str]:
+        """Symbol declared by a line, or None when the line is not a known declaration form."""
+        for pattern in cls.DECLARATION_PATTERNS:
+            match = pattern.search(line)
+            if match:
+                return match.group(1)
+        return None
 
     @classmethod
     def extract_declared_identifiers(cls, smt_text: str) -> Set[str]:
@@ -56,18 +74,9 @@ class Z3Verifier:
             clean = line.strip()
             if not clean or clean.startswith(";"):
                 continue
-            m_sort = cls.SORT_PATTERN.search(clean)
-            if m_sort:
-                declared.add(m_sort.group(1))
-                continue
-            m_const = cls.CONST_PATTERN.search(clean)
-            if m_const:
-                declared.add(m_const.group(1))
-                continue
-            m_fun = cls.FUN_PATTERN.search(clean)
-            if m_fun:
-                declared.add(m_fun.group(1))
-                continue
+            name = cls._declared_name(clean)
+            if name is not None:
+                declared.add(name)
         return declared
 
     @classmethod
@@ -85,45 +94,47 @@ class Z3Verifier:
             if not clean or clean.startswith(";"):
                 continue
 
-            m_sort = cls.SORT_PATTERN.search(clean)
-            if m_sort:
-                name = m_sort.group(1)
+            name = cls._declared_name(clean)
+            if name is not None:
                 if name in current_declared:
                     continue
                 current_declared.add(name)
-                filtered.append(decl)
-                continue
 
-            m_const = cls.CONST_PATTERN.search(clean)
-            if m_const:
-                name = m_const.group(1)
-                if name in current_declared:
-                    continue
-                current_declared.add(name)
-                filtered.append(decl)
-                continue
-
-            m_fun = cls.FUN_PATTERN.search(clean)
-            if m_fun:
-                name = m_fun.group(1)
-                if name in current_declared:
-                    continue
-                current_declared.add(name)
-                filtered.append(decl)
-                continue
-
-            # If not matching known declaration patterns, keep it
+            # Anything that is not a known declaration form is kept untouched
             filtered.append(decl)
 
         return filtered, current_declared
+
+    @staticmethod
+    def _result(
+        status: str,
+        is_sat: bool = False,
+        is_unsat: bool = False,
+        error_message: Optional[str] = None,
+        model_str: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> SMTVerificationResult:
+        """Single construction point of the verification verdicts."""
+        return SMTVerificationResult(
+            status=status,
+            is_sat=is_sat,
+            is_unsat=is_unsat,
+            error_message=error_message,
+            model_str=model_str,
+            details={} if details is None else details,
+        )
 
     def verify_constraints(
         self,
         constraints: SMTConstraints,
         ontology_smt2: Optional[str] = None,
+        timeout_ms: Optional[int] = None,
     ) -> SMTVerificationResult:
         """Verifies SMT constraints combined with optional ontology declarations."""
         solver = z3.Solver(ctx=self.smt_context) if self.smt_context is not None else z3.Solver()
+        budget_ms = self.timeout_ms if timeout_ms is None else timeout_ms
+        if budget_ms:
+            solver.set("timeout", int(budget_ms))
         smt_segments: List[str] = []
 
         ontology_symbols: Set[str] = set()
@@ -141,44 +152,34 @@ class Z3Verifier:
         smt_segments.extend(constraints.assertions)
 
         full_smt_program = "\n".join(smt_segments)
+        verdict_details = {"assertions_count": len(constraints.assertions)}
+        if budget_ms:
+            verdict_details["timeout_ms"] = int(budget_ms)
 
         try:
             solver.from_string(full_smt_program)
             check_status = solver.check()
 
             if check_status == z3.sat:
-                model_str = None
                 try:
-                    model = solver.model()
-                    model_str = str(model)
-                except Exception:
-                    pass
-                return SMTVerificationResult(
+                    model_str: Optional[str] = str(solver.model())
+                except z3.Z3Exception:
+                    model_str = None
+                return self._result(
                     status="sat",
                     is_sat=True,
-                    is_unsat=False,
                     model_str=model_str,
-                    details={"assertions_count": len(constraints.assertions)},
+                    details=verdict_details,
                 )
-            elif check_status == z3.unsat:
-                return SMTVerificationResult(
-                    status="unsat",
-                    is_sat=False,
-                    is_unsat=True,
-                    details={"assertions_count": len(constraints.assertions)},
-                )
-            else:
-                return SMTVerificationResult(
-                    status="unknown",
-                    is_sat=False,
-                    is_unsat=False,
-                    details={"solver_reason": solver.reason_unknown()},
-                )
+            if check_status == z3.unsat:
+                return self._result(status="unsat", is_unsat=True, details=verdict_details)
+            return self._result(
+                status="unknown",
+                details=dict(verdict_details, solver_reason=solver.reason_unknown()),
+            )
         except Exception as exc:
-            return SMTVerificationResult(
+            return self._result(
                 status="error",
-                is_sat=False,
-                is_unsat=False,
                 error_message=str(exc),
-                details={"smt_code": full_smt_program},
+                details=dict(verdict_details, smt_code=full_smt_program),
             )

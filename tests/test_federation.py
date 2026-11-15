@@ -132,26 +132,25 @@ def test_resolve_node_transport_git(mock_subproc, tmp_path):
         "local_cache_path": str(cache_dir),
     }
 
+    def assert_git_invocation(argv):
+        """Checks the git argv and the strict mode of the last invocation."""
+        # The transport safety options (encoding, timeout) may evolve without rewriting this test
+        call = mock_subproc.call_args
+        assert call[0][0] == argv
+        assert call[1]["check"] is True
+
     # Case 1: absent cache path -> clone
     res = resolve_node_transport(conf)
     assert res == cache_dir
-    mock_subproc.assert_called_with(
-        ["git", "clone", "--branch", "main", "--depth", "1", "http://127.0.0.1:9418/repo.git", str(cache_dir)],
-        check=True,
-        capture_output=True,
-        text=True,
+    assert_git_invocation(
+        ["git", "clone", "--branch", "main", "--depth", "1", "http://127.0.0.1:9418/repo.git", str(cache_dir)]
     )
 
     # Case 2: present cache path -> pull
     cache_dir.mkdir(parents=True)
     res2 = resolve_node_transport(conf)
     assert res2 == cache_dir
-    mock_subproc.assert_called_with(
-        ["git", "-C", str(cache_dir), "pull", "origin", "main"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    assert_git_invocation(["git", "-C", str(cache_dir), "pull", "origin", "main"])
 
 
 def test_node_resolver(tmp_path):

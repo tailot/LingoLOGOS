@@ -5,13 +5,21 @@ Supports:
   2. git: Remote git repositories dynamically cloned/updated into a local cache.
   3. http: Remote HTTP/REST endpoints for offloading computational or SMT tasks.
 
+Failures of the git transport are reported as OrchestratorError with an English message, so a
+session never dies on a raw subprocess traceback coming from the transport layer.
+
 Follows English-only, ASCII-only rules and avoids apostrophes.
 """
 
 import subprocess
 import pathlib
-from typing import Dict, Any, Union, Optional
-import httpx
+from typing import Dict, Any, Union, Optional, Sequence
+
+from .schema import OrchestratorError
+
+#: Budget for one git synchronisation of a remote node, in seconds. Without it a hung
+#: repository endpoint would block the session before the first turn is dispatched.
+GIT_TIMEOUT_SECONDS = 120
 
 
 def _local_base_dir(node_config: Dict[str, Any], workspace_dir: Optional[pathlib.Path]) -> pathlib.Path:
@@ -24,6 +32,35 @@ def _local_base_dir(node_config: Dict[str, Any], workspace_dir: Optional[pathlib
     if base.is_absolute():
         return base.resolve()
     return (pathlib.Path(workspace_dir or ".") / base).resolve()
+
+
+def _run_git(arguments: Sequence[str], repo_url: str) -> None:
+    """Runs one git command, reporting every transport failure as an orchestrator error.
+
+    The raw subprocess exceptions leak the operating system wording and abort the session with a
+    traceback, while the orchestrator protocol asks for OrchestratorError with an English message.
+    """
+    try:
+        subprocess.run(
+            ["git", *arguments],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise OrchestratorError(
+            f"Git synchronisation of '{repo_url}' timed out after {GIT_TIMEOUT_SECONDS} seconds."
+        ) from exc
+    except subprocess.CalledProcessError as exc:
+        reason = (exc.stderr or "").strip() or f"git {arguments[0]} exited with {exc.returncode}"
+        raise OrchestratorError(f"Git synchronisation of '{repo_url}' failed: {reason}") from exc
+    except OSError as exc:
+        raise OrchestratorError(
+            f"Git executable could not be started while resolving '{repo_url}': {exc}"
+        ) from exc
 
 
 def resolve_node_transport(
@@ -44,23 +81,16 @@ def resolve_node_transport(
 
         if not cache_path.exists():
             cache_path.parent.mkdir(parents=True, exist_ok=True)
-            subprocess.run(
-                ["git", "clone", "--branch", branch, "--depth", "1", repo_url, str(cache_path)],
-                check=True,
-                capture_output=True,
-                text=True,
+            _run_git(
+                ["clone", "--branch", branch, "--depth", "1", repo_url, str(cache_path)],
+                repo_url,
             )
         else:
-            subprocess.run(
-                ["git", "-C", str(cache_path), "pull", "origin", branch],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
+            _run_git(["-C", str(cache_path), "pull", "origin", branch], repo_url)
 
         return cache_path
 
-    elif transport == "http":
+    if transport == "http":
         return node_config["endpoint_url"]
 
     return _local_base_dir(node_config, workspace_dir)
@@ -100,7 +130,8 @@ class NodeResolver:
                 "auth_token_env": node_config.get("auth_token_env"),
             }
 
-        base_dir = (self.workspace_dir / res).resolve() if not res.is_absolute() else res
+        # resolve_node_transport already anchors local and git caches on the workspace
+        base_dir = pathlib.Path(res).resolve()
         grammar_rel = specs.get("grammar", "grammar.gf")
         ontology_rel = specs.get("ontology", "ontology.smt2")
         seed_rel = specs.get("seed", "seed_payload.json")
