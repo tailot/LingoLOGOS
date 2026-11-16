@@ -1461,7 +1461,7 @@ One arithmetic and algebra question answered by seven agents: `formalizer_a` and
 the sentence independently, `solver_a` and `solver_b` answer it, `verifier` and `adversary` judge the
 answers, and `arbiter` applies the decision rule and prints the verdict. The material sits in
 `datasets/math` as an example dataset track in the sense of section 4.3 and section 7 of `README.md`:
-71 files, self contained (`lgmath/`, `agents/`, `tools/`, `nodes/`, `problems/`, `results/`,
+80 files, self contained (`lgmath/`, `agents/`, `tools/`, `nodes/`, `problems/`, `results/`,
 `topology.json`), documented by the `README.md` inside the folder, and deliberately not re-included by
 a negation line in `.gitignore`, so the working copy stays out of the git history of this repository.
 The same content is published as a dataset split at
@@ -1471,13 +1471,17 @@ three sections of its own (the two corpus files, rights, citation).
 
 ### 17.2 Sentence families and dispatch
 
-Fourteen sentence kinds, one family each, behind a lazy registry: `family_of(kind)` and
+Seventeen sentence kinds, one family each, behind a lazy registry: `family_of(kind)` and
 `all_kinds()` in `lgmath/families.py`, with the steps shared by several families collected in
 `lgmath/famsteps.py`. Agent answers carry the key `kind`, not `type`. The written language is
 extended over the original one: domains `R` and `Z`, the operators `mod`, `div` (emitted as `idiv`)
 and `|` (emitted as `dvd`), matrix literals `[[1,2],[3,4]]`, and the grammar gains the `vec`, `mat`
-and `row` nodes. `problems/corpus.jsonl` holds 184 problems with the fields `expect`, `gold`, `id`,
-`kind`, `text`, and splits into 145 `VERIFIED`, 18 `SINGLE_PROVER`, 21 `UNKNOWN`. A second corpus,
+and `row` nodes. Column vectors `[1, 2]` and the terms `dot u v` and `matvec M v` were added later
+without a new kind: they expand into sums and products in `tree.expand_term`, so `evaluate`, `prove`,
+`solve` and `optimize` all see them, and a bare vector is not a scalar term. Three more commands
+`maxflow`, `reduce`, `sos` bring three new kinds, and they are documented in section 17.7.
+`problems/corpus.jsonl` holds 220 problems with the fields `expect`, `gold`, `id`, `kind`, `text`, and
+splits into 178 `VERIFIED`, 21 `SINGLE_PROVER`, 21 `UNKNOWN`. A second corpus,
 `problems/shortcuts.jsonl`, holds 92 `evaluate` rows whose label is the mental route of section 17.6
 rather than a verdict: 84 routed rows, six per technique, and 8 rows on which the layer abstains. Linear
 programs join their constraints with `and`: a comma is a parse error, not a separator. An exponent of
@@ -1500,24 +1504,46 @@ the 77,760 dossiers of the evidence space, which the rule as written sorts into 
 `SINGLE_PROVER` and 77,046 `UNKNOWN`: ignoring a checker that could not decide moves 112 dossiers and
 every one of them moves up; discounting the adversary whenever formalization B is missing moves 273,
 147 up and 126 down; dropping the requirement that the two readings agree moves 70, all up. None of
-the three readings is used. On the 184 problems of the corpus all four readings give the same verdicts,
-so strictness costs no availability here; the folder README section 4 reports what the adversary
-relaxation cost in one experiment, 52 silent errors.
+the three readings is used. On the 199 supported problems of the corpus all four readings give the same
+verdicts, 178 `VERIFIED` and 21 `SINGLE_PROVER`, so strictness costs no availability there; the 21
+`unsupported` rows abstain under every reading because no solver answer reaches the rule. The 52 silent
+errors that the adversary relaxation cost once are a historical measurement of the rule that shipped with
+the families, not of the rule in this code.
 
 ### 17.4 Numbers measured on this checkout
 
-The bundle suite gives **2476 passed**, in 40.5 s to 47.0 s run from inside `datasets/math` and 54.5 s
-run from the repository root as `python -m pytest datasets/math/tests -q`. Copied outside the
-repository it gives **2465 passed and 1 skipped** in 38.5 s: the eleven end to end tests need the
-orchestrator package, nothing else does. Of those 2476 tests, 1745 belong to the three files of the
-mental shortcut layer described in section 17.6. The repository suite is
-unchanged at **464 passed and 10 skipped**, because `testpaths` in `pyproject.toml` stays `["tests"]`.
-`results/ablation.json` is regenerated with the folder and covers 12 agent configurations over 163
-problems; the reading of those columns, including what removing a role costs, is in the folder README.
-The three tests that came from the audit of the previous bundle are permanent inside the folder:
+The ablation of section 17.3 was regenerated in this checkout over the **199** supported problems of the
+corpus (the `unsupported` rows are excluded) and covers **12 agent configurations**: with no faults every
+configuration answers all 199 correctly, and from 5 agents on 178 come back `VERIFIED` and 21
+`SINGLE_PROVER`. Under single faults the 3 agent configuration produced **56** silent errors in 724
+activated runs and every configuration with 4 agents or more produced **0**; total activated runs rise to
+1633 at 7 agents, where 1440 faults were caught by an independent component. Under the tolerance model
+(solver faults plus one trusted fault) the full topology gives **0** silent errors in **5166** activated
+runs over 44 experiments, and 5 agents give **0** in 4358 over 40; dropping either checker leaves 4
+experiments that produce **110** silent errors in 796 activated runs, 107 of them from the catalogue pair
+`flip_verdict` on both solvers with a rubber stamped checker. The whole sweep took about 58 minutes on
+24 cores and `results/ablation.json` is what it wrote.
+
+The regeneration also produced a real finding: 10 silent errors at 4 agents, and the same 10 with the
+adversary removed, all on `maxflow` rows whose delivered answer carried an empty cut. The exact checker
+refused that certificate, the Z3 checker had never read it, and the rule of section 17.3 therefore handed
+out `SINGLE_PROVER` for a wrong answer. The two checkers now decide the same ground statement (weak
+duality: the delivered flow is admissible, the delivered side separates source from sink, its capacity is
+compared with the claimed value, and no rival flow beats it), an ill formed cut is refused before any SMT
+text is built, and `fam_flow.perturb` answers the `closed_open` kind by widening the delivered side, which
+is what made the gap visible in the experiment. `tests/test_flow.py` pins all of it.
+
+The permanent tests that came from auditing the previous bundle are still there:
 `tests/test_decide_rule.py` (the evidence space against an independent transcription of the rule),
-`tests/test_answer_rendering.py` (printed answers read back by a separate reader, 34,713 sampled
-points) and `tests/test_zero_exponent.py`.
+`tests/test_answer_rendering.py` (printed answers read back by a separate reader, 34,713 sampled points)
+and `tests/test_zero_exponent.py`.
+
+The bundle suite gives **2687 passed**, in 70.4 s run from inside `datasets/math` and 76.7 s run from the
+repository root as `python -m pytest datasets/math/tests -q`. Copied outside the repository it gives
+**2676 passed and 1 skipped** in 57.5 s: the eleven end to end tests need the orchestrator package,
+nothing else does. Of those 2687 tests, 1745 belong to the three files of the mental shortcut layer
+described in section 17.6. The repository suite is unchanged at **464 passed and 10 skipped**, because
+`testpaths` in `pyproject.toml` stays `["tests"]`.
 
 ### 17.5 Repository integration notes
 
@@ -1533,12 +1559,13 @@ at `datasets/multilingual/tools/publish_to_hub.py` already owns it, and `tests/t
 that builder by taking the first
 `datasets/*/tools` folder that holds a file of that name: a second file of the same name under
 `datasets/math` gets imported in its place, which two of those tests noticed as a missing attribute. It
-counts 71 files and 276 corpus rows before touching the network, rewrites the folder
+counts the 81 files of the staged tree and the 312 corpus rows before touching the network (80 files of
+the folder plus the card that replaces its README), rewrites the folder
 README into the dataset card through a list of sentence pairs in which every pair has to match (a
 silent miss would publish a card that contradicts the code beside it), appends the three hub-only
 sections, uploads a staging copy that leaves `.git`, `__pycache__` and `.pytest_cache` behind, and then
-reads the repository back and compares the 70 files other than the card by sha256; the run reported 72
-objects, nothing missing, nothing unexpected, nothing differing. `--prune` additionally deletes from the
+reads the repository back and compares every file but the card by sha256; the published tree holds one
+object per uploaded file plus the `.gitattributes` the hub adds. `--prune` additionally deletes from the
 hub the files the folder no longer holds, which a rename needs: an upload on its own leaves the old name
 behind. The working copy under
 `datasets/math` also carries its own local git repository (branch `master`, no remote), which is where
@@ -1628,9 +1655,93 @@ recompute every step and every announced span, the gate, the 16 obligations, the
 `tests/test_shortcut_routing.py` (544 tests: cost counted from the steps actually written, determinism,
 the minimum, abstention) and `tests/test_shortcut_corpus.py` (739 tests: the 92 rows through the seven
 agents, `VERIFIED` and correct on all of them, the isolation of the verdict from the layer, the fault
-signal) together carry 1745 of the 2476 tests of the folder. `tools/shortcuts.py --generate` rewrites
+signal) together carry 1745 of the 2687 tests of the folder. `tools/shortcuts.py --generate` rewrites
 `problems/shortcuts.jsonl` and exits non zero if a row's label disagrees with what the router chooses, so
 the corpus cannot drift away from the code that produced it. What the layer deliberately does not do: add
 syntax (percentages, decimal literals, summation signs would touch both parsers, the grammars and the
 `unsupported` threshold, so the techniques that need them are not implemented) and add evidence.
+
+### 17.7 Answers that carry their own proof: networks, lattices, quadratic forms
+
+Three kinds were added after the shortcut layer, each with a library module, a family module and a test
+file of its own: `lgmath/flow.py` with `lgmath/fam_flow.py`, `lgmath/lattice.py` with
+`lgmath/fam_lattice.py`, and `lgmath/quadratic.py` with `lgmath/fam_sos.py`. They share one design
+choice, which is what makes them verifiable at all: **the answer is a witness, not a value**. The payload
+carries the object that proves the claim (a flow beside a cut, a basis beside the integer change matrix
+that produced it, a list of squares or a single point where the form is negative), and both checkers
+re-derive the claim from that witness with their own engine. The claim itself is written once, as ground
+SMT-LIB text in which every number is a literal, so the two checkers that read it are not reading a
+restatement of the conclusion but a consequence of it.
+
+**Networks (`maxflow`, kind `maxflow`, 10 corpus rows).** `maxflow [[0, 6], [0, 0]] from 1 to 2` names
+nodes `1` to `n` of a capacity matrix. Fragment: 2 to 7 nodes, square matrix, closed and non negative
+capacities, no arc from a node to itself, two distinct terminals. The invariant is the weak duality
+inequality: for every admissible flow and every side of a partition that contains the source and not the
+sink, the value of the flow is at most the capacity of that side (the sum over the arcs crossing it in the
+forward direction). The `z3_confirm` query is a single disjunction with four parts: the delivered flow is
+not admissible, or its value is not the claimed one, or the capacity of the delivered side is not the
+claimed one, or there is an admissible rival flow with a strictly larger value than that capacity. The
+first three parts are ground because the delivered flow and the delivered side are substituted into the
+text as literals; only the rival carries free arc variables, which keeps the query inside linear
+real arithmetic. `unsat` means admissible, correct in value, and optimal. Before any text is built the
+side is read back: a payload whose `cut` is missing, empty, repeated or out of range is refused outright,
+because an answer without a certificate proves nothing. The exact checker recomputes the
+maximum with Edmonds-Karp and then calls `flow.check_max_flow` on the delivered pair, which checks
+capacity, conservation, that the cut really partitions the nodes with the source on one side, and that the
+capacity of that cut equals the claimed value; that is the same statement the SMT disjunction spells out.
+The Z3 solver maximizes the flow value with `z3.Optimize`
+and pairs it with a cut obtained by enumerating the splits (at most 8 nodes), refusing the answer when the
+two disagree. `lgmath/flow.py` also expresses the network as a linear program (`as_lp`) and reads a cut
+back out of the LP dual, a third route that `tests/test_flow.py` checks against the other two; the test
+file also walks every side of each corpus network through both checkers and asserts each one is judged by
+the capacity it has. `same`
+compares values, and the gold records only `{"status": "flow", "value": ...}`: the delivered flow is one
+of many.
+
+**Lattices (`reduce`, kind `reduce`, 8 corpus rows).** `reduce [[1, 0], [2, 1]]` asks for a reduced basis
+of the lattice spanned by the rows. Fragment: 1 to 4 linearly independent integer vectors of at most 4
+coordinates, each of magnitude below `10^6`. The claim is the statement of LLL with no trace of the
+algorithm: the new rows are integer combinations of the old ones through the delivered matrix `E`, the
+square of `det E` is 1 (so the change is unimodular and invertible over the integers), and the new basis
+satisfies the size and Lovasz conditions for `delta = 3/4`. `lattice.check_reduced` recomputes those two
+conditions from the delivered basis, `lattice.same_lattice` decides whether two bases generate the same
+lattice through the canonical Hermite form, and the covolume is the absolute value of the determinant of
+any square sub-basis. A reduced basis is not unique, so the gold does not name one: it fixes the rank, the
+covolume and the canonical Hermite form of the answer. The exact solver runs LLL over `Fractions`
+(`reduce_basis`, Gram-Schmidt, Babai nearest plane); the Z3 solver searches a bounded change of basis and
+deliberately abstains above rank 2, which is why the lattice sentences are `VERIFIED` at assurance 3 only
+when the exact route also answers, and why `tests/test_lattice.py` contains a rank 3 sentence that is
+verified with the Z3 route silent. Gram-Schmidt and the HNF stay inside `lattice.INTERNAL = 10^12`, which
+is why a public coordinate is capped at `10^6`.
+
+**Quadratic forms (`sos`, kind `sos`, 12 corpus rows).** `sos [[1, 2], [2, 1]]` asks whether the form
+`sum M_ij x_i x_j` is a sum of squares of linear forms over the rationals. Fragment: a symmetric integer
+matrix of at most 4 rows, coefficients below `10^6`. Over the rationals the question is the same as
+"the form is never negative", so the answer carries one of two witnesses: positive weights `w_k` and
+integer linear forms `L_k` with `M = sum w_k L_k L_k^T`, or one point `p` with `p^T M p < 0`. The rank of
+the matrix is part of the answer and is certified by principal minors, not by elimination: `[[0, 1], [1,
+0]]` has every `1 x 1` principal minor zero and rank 2, and a criterion on *leading* minors alone is wrong
+on `[[0, 0], [0, -1]]`, so `quadratic.non_negative` walks all `2^n - 1` of them. The exact route
+diagonalizes by congruence, keeping `E M E^T` diagonal; the linear forms are the **columns** of `E^-1` and
+the weights are the pivots, which is the part of the argument that is easy to get backwards. A zero
+diagonal entry is cleared by adding a row and the same column to another pair, which turns a non zero
+off diagonal entry `s` into a diagonal `2 s`. The Z3 route decides the sign by the minor criterion and,
+when the form is negative, asks `nlsat` for the point, refusing to answer when the model is not a rational
+vector, too large to read, or does not actually make the form negative. Both checkers then re-evaluate the
+witness entry by entry as ground arithmetic, and they compare the number of weights with the number of
+forms because `zip` would otherwise hide a weight with no square beside it.
+
+**What the fault catalogue does with these shapes.** `faults.mutate_answer` hands a payload whose `type` is
+not one of `value`, `verdict`, `set` to `family.perturb(answer, kind)`. Each family names the kinds it can
+bend and returns `(answer, False)` when a kind does not apply, rather than inventing a mutation that
+happens to be wrong: nudging a witness point is not always a wrong answer, so `fam_sos` only flips the
+verdict on a negative witness; a flow problem always has a maximum, so `fam_flow` does not bend a verdict
+either but answers `closed_open` by widening the delivered side, which leaves the value right and the
+certificate wrong. The tests for the three families assert, for every perturbation a family
+admits, that **both** checkers refuse it under both Z3 configurations. `tests/test_flow.py` (13 tests),
+`tests/test_vectors.py` (11), `tests/test_lattice.py` (17) and `tests/test_quadratic.py` (32) pin the
+invariants on seeded random objects as well as on the shipped sentences: max flow against cut enumeration,
+the certificate on random lattices and its failure on a broken one, the Hermite form as a lattice
+invariant, the congruence identity and the elimination rank against the minor rank on random symmetric
+forms, and the corpus rows against gold recomputed independently by the exact engine.
 
