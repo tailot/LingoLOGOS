@@ -2,6 +2,12 @@
 
 Integrated neuro-symbolic architecture designed for differentiable grammar induction and rule synthesis from unstructured data streams. The engine combines continuous representations learned via neural networks with the formal constraints of Probabilistic Context-Free Grammars (**PCFG**) in Chomsky Normal Form (**CNF**).
 
+Published resources of this project, with what they are:
+
+| Link | Type | Category |
+| :--- | :--- | :--- |
+| https://huggingface.co/datasets/tailot/lingologos-math | Topology | math |
+
 ---
 
 ## 1. System Architecture
