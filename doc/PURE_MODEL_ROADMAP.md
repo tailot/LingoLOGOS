@@ -6,7 +6,7 @@ third-party weights anywhere. It records what is already built and measured, wha
 missing, and the corrections that measurement forced on the original specification.
 
 Related: `doc/TECHNICAL_DOCUMENTATION.md` sections 1.6 and 1.7 (tokenizer and mask design),
-`datasets/multilingual/TRAINING.md` (commands, flags, gates), `README.md` section 11 (short version).
+`datasets/multilingual/TRAINING.md` (commands, flags, gates), `datasets/multilingual/README.md` (short version).
 
 ---
 

@@ -107,7 +107,7 @@ src/neuro_symbolic/
 
 ### 1.6 `tokenizer.py` - Vocabulary Learned From the Corpus, Not Imported
 
-The pure model track (see `doc/PURE_MODEL_ROADMAP.md` and section 11 of `README.md`) needs a
+The pure model track (see `doc/PURE_MODEL_ROADMAP.md` and `datasets/multilingual/README.md`) needs a
 subword vocabulary that is **trained on this corpus** with no pretrained artifact anywhere.
 `tokenizer.py` implements that vocabulary, format id `lingologos-bpe-1`, in plain Python: no
 `from_pretrained` call exists in this repository and the file has no dependency outside the
@@ -540,7 +540,8 @@ not in the repository either: they are published as `model.safetensors` in the H
 repository `tailot/lingologos-pure-1`, next to the tokenizer, the mask specification, the gate report
 and the model card assembled by `datasets/multilingual/tools/publish_to_hub.py`. Sizing notes for consumer cards, the
 measured saturation of the vocabulary, the measured cost of a 20-epoch run and the full flag
-documentation are in `datasets/multilingual/TRAINING.md` and in section 11 of `README.md`.
+documentation are in `datasets/multilingual/TRAINING.md` and in `datasets/multilingual/README.md`,
+the README that track ships with itself.
 
 ### 2.5 Building and Checking the `asic_chip/` Track
 
@@ -744,7 +745,7 @@ To maintain high engineering and academic standards:
 ### 4.3 Repository Hygiene
 - Never commit `*.pyc` bytecode or `__pycache__/` folders.
 - Store trained weights strictly under `artifacts/grammar_weights.pt`; keep `artifacts/metrics.json` next to the grammars so every exported artifact stays auditable. `artifacts/` is version-controlled and is overwritten by each `synthesize.py` run. `tests/test_grammar_artifacts.py` locks that state: it runs the synthesis into a temporary folder and refuses a checkout whose committed grammar JSON, YAML or GF module no longer equals what the current code exports, and it checks the four gates of the report rather than its measured digits, since two runs with the same seed differed there in the eighth significant digit. The folder is load-bearing beyond that track: gate 3 of the ASIC suite reads `artifacts/grammar.json` for the terminal set it compares with the alphabet of the generated automaton.
-- **The two user-facing folders are ignored by default, with the shipped material re-included.** `datasets/` and `topologies/` are the places where a user writes their own material: a corpus folder for a new federated node, a topology document saved by the workbench canvas. The `.gitignore` therefore excludes both folders wholesale (`datasets/*`, `topologies/*`) and brings the shipped material back one entry at a time with negation patterns (`!datasets/agente_alfa/`, `!datasets/agente_beta/`, `!datasets/arbitro_logico/`, `!datasets/multilingual/`, `!topologies/federated_mesh.json`). This is the exclusion technique: the default answer for a new path is "not tracked", so a new dataset or topology never reaches `git status` from the moment it is saved, and a missing negation is a visible omission instead of an accidental commit. Two ordering constraints follow from the last-matching-pattern-wins rule and must be preserved when the file is edited: the negations come after the two folder patterns, and the folder-level rules that keep training outputs local (`datasets/multilingual/checkpoints/`, `datasets/multilingual/_smoke/`) come after the negation that re-includes that folder, because git only descends into a folder it has re-included. Shipping a new dataset or topology therefore takes one extra negation line; a new user dataset or topology takes none. Already tracked files are unaffected by ignore rules, and `tests/test_federation.py` keeps reading `topologies/federated_mesh.json` as before.
+- **The two user-facing folders are ignored by default, with the shipped material re-included.** `datasets/` and `topologies/` are the places where a user writes their own material: a corpus folder for a new federated node, a topology document saved by the workbench canvas. The `.gitignore` therefore excludes both folders wholesale (`datasets/*`, `topologies/*`) and brings the shipped material back one entry at a time with negation patterns (`!datasets/agente_alfa/`, `!datasets/agente_beta/`, `!datasets/arbitro_logico/`, `!datasets/multilingual/`, `!topologies/federated_mesh.json`). This is the exclusion technique: the default answer for a new path is "not tracked", so a new dataset or topology never reaches `git status` from the moment it is saved, and a missing negation is a visible omission instead of an accidental commit. Two ordering constraints follow from the last-matching-pattern-wins rule and must be preserved when the file is edited: the negations come after the two folder patterns, and the folder-level rules that keep training outputs local (`datasets/multilingual/checkpoints/`, `datasets/multilingual/_smoke/`) come after the negation that re-includes that folder, because git only descends into a folder it has re-included. Shipping a new dataset or topology therefore takes one extra negation line; a new user dataset or topology takes none. Already tracked files are unaffected by ignore rules, and `tests/test_federation.py` keeps reading `topologies/federated_mesh.json` as before. What ships in the two folders is **example material**, and the documentation says so rather than implying it: the three node payloads are the fixed sample a federated node has to provide, the two topology documents are sample routing matrices over those nodes and not a recommended deployment, and each example dataset track under `datasets/` documents itself in the `README.md` inside its own folder, with its own commands, its measured numbers and its declared limits. Section 7 of `README.md` states the same for the reader of the repository, and a track that is documented that way can be moved, republished or dropped without anything outside its folder noticing.
 
 ### 4.4 Known Limitations (measured, not asserted)
 1. **Induction from random initialization is not yet solved.** With `--init random` (120 epochs, same optimizer
@@ -1449,3 +1450,76 @@ The room a module shows is shared out, never fixed by a `setFixedHeight`.
 **Schematic zoom and walking.** `views/hardware.py` `SchematicView` draws into a virtual area of `VIRTUAL_W` x `VIRTUAL_H` (1240 x 820) and places it with `_refresh_transform()`: translate to the centre of the usable band (`_usable()`, the widget below its `HEADER_BAND` of 30 px) plus the pan offset, scale by `_fit_scale() * zoom`, translate back by half the virtual size. With `zoom` 1.0 and no pan that is the letterboxed fit the widget always had, pixel for pixel. `die_rects()` arranges the blocks in `ceil(sqrt(n))` columns and grows the virtual area when the blocks would fall under `MIN_DIE_W` x `MIN_DIE_H` (250 x 190), never past `MAX_DIE_W` x `MAX_DIE_H` (340 x 236), so a board of forty dies still shows readable blocks at the default fit. The band above the drawing is painted in device space and repeats the zoom. `set_zoom(value, anchor)` keeps the point under the cursor still, `zoom_in`, `zoom_out`, `reset_view`, the wheel, `+`, `-`, `0`, `pan_by`, the arrow keys, `center_on` and `focus_die` cover the rest, and every change of `_pan`, `_zoom` or `_virtual` calls `_refresh_transform()` so `_pick` tests the transform that is really on screen. Pens and fonts are level of detail aware: `_line_width` never sends a pen under a hairline and `_readable_font` never leaves text below `MIN_TEXT_PT` (6.5 pt) on screen. `HardwarePanel` puts Zoom out, Zoom in, Fit board and Center selected die, with the `zoom N pct` and `canvas W x H` chips, in the strip above the drawing.
 
 `tests/test_workbench_layout.py` locks the fold and the column share, the reserved bands and the width clamp of a node card, the layout step of a tall card, the unchanged default fit of both views, the zoom clamps and the hit test after a zoom and a pan.
+
+---
+
+## 17. Mathematical Problem Topology (`datasets/math`)
+
+### 17.1 What it is and where it lives
+
+One arithmetic and algebra question answered by seven agents: `formalizer_a` and `formalizer_b` read
+the sentence independently, `solver_a` and `solver_b` answer it, `verifier` and `adversary` judge the
+answers, and `arbiter` applies the decision rule and prints the verdict. The material sits in
+`datasets/math` as an example dataset track in the sense of section 4.3 and section 7 of `README.md`:
+63 files, self contained (`lgmath/`, `agents/`, `tools/`, `nodes/`, `problems/`, `results/`,
+`topology.json`), documented by the `README.md` inside the folder, and deliberately not re-included by
+a negation line in `.gitignore`, so the working copy stays out of git. The same content is published
+as a dataset split at `https://huggingface.co/datasets/tailot/lingologos-math`; the hub card keeps the
+section numbers of the folder README, which is what the reference in `tests/test_decide_rule.py`
+resolves against.
+
+### 17.2 Sentence families and dispatch
+
+Fourteen sentence kinds, one family each, behind a lazy registry: `family_of(kind)` and
+`all_kinds()` in `lgmath/families.py`, with the steps shared by several families collected in
+`lgmath/famsteps.py`. Agent answers carry the key `kind`, not `type`. The written language is
+extended over the original one: domains `R` and `Z`, the operators `mod`, `div` (emitted as `idiv`)
+and `|` (emitted as `dvd`), matrix literals `[[1,2],[3,4]]`, and the grammar gains the `vec`, `mat`
+and `row` nodes. `problems/corpus.jsonl` holds 184 problems with the fields `expect`, `gold`, `id`,
+`kind`, `text`, and splits into 145 `VERIFIED`, 18 `SINGLE_PROVER`, 21 `UNKNOWN`. Linear programs
+join their constraints with `and`: a comma is a parse error, not a separator. An exponent of zero is
+the constant 1 in both SMT emitters, which is what the shipped `tests/test_zero_exponent.py` locks;
+Z3 5.3.3 leaves `(^ x 0.0)` unconstrained at `x = 0`, so the convention is the emitters' job.
+
+### 17.3 The decision rule and its monotonicity invariant
+
+`decide` in `lgmath/agents.py` is a pure function of the dossier, which is what lets the driver
+recompute a verdict from a transcript it did not write. A solver answer is kept when every checker
+present in the dossier confirms it and none rejects it; a checker that is present but holds no usable
+judgement **blocks** the answer instead of being ignored; a role switched out of the topology is simply
+absent and does not count. A sampling match can refute an answer but never confirm one, because
+`UNKNOWN` is defined by a missing confirmation. Assurance 3 additionally requires the exact non-Z3
+judgement, a Z3 judgement on the same answer, and the proof that the two formalizations are
+equivalent.
+
+The invariant is that weakening the evidence never raises assurance. It was swept, not asserted, over
+the 77,760 dossiers of the evidence space, which the rule as written sorts into 70 `VERIFIED`, 644
+`SINGLE_PROVER` and 77,046 `UNKNOWN`: ignoring a checker that could not decide moves 112 dossiers and
+every one of them moves up; discounting the adversary whenever formalization B is missing moves 273,
+147 up and 126 down; dropping the requirement that the two readings agree moves 70, all up. None of
+the three readings is used. On the 184 problems of the corpus all four readings give the same verdicts,
+so strictness costs no availability here; the folder README section 4 reports what the adversary
+relaxation cost in one experiment, 52 silent errors.
+
+### 17.4 Numbers measured on this checkout
+
+The bundle suite gives **731 passed**, in 54.4 s run from inside `datasets/math` and 43.4 s run from
+the repository root. Copied outside the repository it gives **720 passed and 1 skipped** in about 35 s:
+the eleven end to end tests need the orchestrator package, nothing else does. The repository suite is
+unchanged at **464 passed and 10 skipped**, because `testpaths` in `pyproject.toml` stays `["tests"]`.
+`results/ablation.json` is regenerated with the folder and covers 12 agent configurations over 163
+problems; the reading of those columns, including what removing a role costs, is in the folder README.
+The three tests that came from the audit of the previous bundle are permanent inside the folder:
+`tests/test_decide_rule.py` (the evidence space against an independent transcription of the rule),
+`tests/test_answer_rendering.py` (printed answers read back by a separate reader, 34,713 sampled
+points) and `tests/test_zero_exponent.py`.
+
+### 17.5 Repository integration notes
+
+The tools and tests of the folder resolve `src/` by walking up the ancestors of their own file, so they
+run from either working directory; that probe replaced two hardcoded parent paths that broke when the
+bundle moved from the repository root into `datasets/math`. No new dependency: `z3-solver` is already
+required by the engine. The folder is not collected by `pytest tests` and adds nothing to
+`pyproject.toml`, `requirements.txt` or the CI matrix; `.github/workflows/dataset.yml` belongs to the
+multilingual track, not to this one. Publishing a change of this folder to the hub is an explicit step
+with the token in the environment, never a side effect of a test run.
