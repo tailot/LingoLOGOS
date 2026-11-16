@@ -1461,12 +1461,13 @@ One arithmetic and algebra question answered by seven agents: `formalizer_a` and
 the sentence independently, `solver_a` and `solver_b` answer it, `verifier` and `adversary` judge the
 answers, and `arbiter` applies the decision rule and prints the verdict. The material sits in
 `datasets/math` as an example dataset track in the sense of section 4.3 and section 7 of `README.md`:
-63 files, self contained (`lgmath/`, `agents/`, `tools/`, `nodes/`, `problems/`, `results/`,
+71 files, self contained (`lgmath/`, `agents/`, `tools/`, `nodes/`, `problems/`, `results/`,
 `topology.json`), documented by the `README.md` inside the folder, and deliberately not re-included by
-a negation line in `.gitignore`, so the working copy stays out of git. The same content is published
-as a dataset split at `https://huggingface.co/datasets/tailot/lingologos-math`; the hub card keeps the
-section numbers of the folder README, which is what the reference in `tests/test_decide_rule.py`
-resolves against.
+a negation line in `.gitignore`, so the working copy stays out of the git history of this repository.
+The same content is published as a dataset split at
+`https://huggingface.co/datasets/tailot/lingologos-math`; the hub card keeps the section numbers of the
+folder README, which is what the reference in `tests/test_decide_rule.py` resolves against, and gains
+three sections of its own (the two corpus files, rights, citation).
 
 ### 17.2 Sentence families and dispatch
 
@@ -1476,10 +1477,12 @@ Fourteen sentence kinds, one family each, behind a lazy registry: `family_of(kin
 extended over the original one: domains `R` and `Z`, the operators `mod`, `div` (emitted as `idiv`)
 and `|` (emitted as `dvd`), matrix literals `[[1,2],[3,4]]`, and the grammar gains the `vec`, `mat`
 and `row` nodes. `problems/corpus.jsonl` holds 184 problems with the fields `expect`, `gold`, `id`,
-`kind`, `text`, and splits into 145 `VERIFIED`, 18 `SINGLE_PROVER`, 21 `UNKNOWN`. Linear programs
-join their constraints with `and`: a comma is a parse error, not a separator. An exponent of zero is
-the constant 1 in both SMT emitters, which is what the shipped `tests/test_zero_exponent.py` locks;
-Z3 5.3.3 leaves `(^ x 0.0)` unconstrained at `x = 0`, so the convention is the emitters' job.
+`kind`, `text`, and splits into 145 `VERIFIED`, 18 `SINGLE_PROVER`, 21 `UNKNOWN`. A second corpus,
+`problems/shortcuts.jsonl`, holds 92 `evaluate` rows whose label is the mental route of section 17.6
+rather than a verdict: 84 routed rows, six per technique, and 8 rows on which the layer abstains. Linear
+programs join their constraints with `and`: a comma is a parse error, not a separator. An exponent of
+zero is the constant 1 in both SMT emitters, which is what the shipped `tests/test_zero_exponent.py`
+locks; Z3 5.3.3 leaves `(^ x 0.0)` unconstrained at `x = 0`, so the convention is the emitters' job.
 
 ### 17.3 The decision rule and its monotonicity invariant
 
@@ -1503,9 +1506,11 @@ relaxation cost in one experiment, 52 silent errors.
 
 ### 17.4 Numbers measured on this checkout
 
-The bundle suite gives **731 passed**, in 54.4 s run from inside `datasets/math` and 43.4 s run from
-the repository root. Copied outside the repository it gives **720 passed and 1 skipped** in about 35 s:
-the eleven end to end tests need the orchestrator package, nothing else does. The repository suite is
+The bundle suite gives **2476 passed**, in 40.5 s to 47.0 s run from inside `datasets/math` and 54.5 s
+run from the repository root as `python -m pytest datasets/math/tests -q`. Copied outside the
+repository it gives **2465 passed and 1 skipped** in 38.5 s: the eleven end to end tests need the
+orchestrator package, nothing else does. Of those 2476 tests, 1745 belong to the three files of the
+mental shortcut layer described in section 17.6. The repository suite is
 unchanged at **464 passed and 10 skipped**, because `testpaths` in `pyproject.toml` stays `["tests"]`.
 `results/ablation.json` is regenerated with the folder and covers 12 agent configurations over 163
 problems; the reading of those columns, including what removing a role costs, is in the folder README.
@@ -1522,4 +1527,110 @@ bundle moved from the repository root into `datasets/math`. No new dependency: `
 required by the engine. The folder is not collected by `pytest tests` and adds nothing to
 `pyproject.toml`, `requirements.txt` or the CI matrix; `.github/workflows/dataset.yml` belongs to the
 multilingual track, not to this one. Publishing a change of this folder to the hub is an explicit step
-with the token in the environment, never a side effect of a test run.
+with the token in the environment, never a side effect of a test run, and `tools/publish_dataset.py` is
+that step. It carries that name rather than `publish_to_hub.py` because the multilingual release builder
+at `datasets/multilingual/tools/publish_to_hub.py` already owns it, and `tests/test_hub_package.py` finds
+that builder by taking the first
+`datasets/*/tools` folder that holds a file of that name: a second file of the same name under
+`datasets/math` gets imported in its place, which two of those tests noticed as a missing attribute. It
+counts 71 files and 276 corpus rows before touching the network, rewrites the folder
+README into the dataset card through a list of sentence pairs in which every pair has to match (a
+silent miss would publish a card that contradicts the code beside it), appends the three hub-only
+sections, uploads a staging copy that leaves `.git`, `__pycache__` and `.pytest_cache` behind, and then
+reads the repository back and compares the 70 files other than the card by sha256; the run reported 72
+objects, nothing missing, nothing unexpected, nothing differing. `--prune` additionally deletes from the
+hub the files the folder no longer holds, which a rename needs: an upload on its own leaves the old name
+behind. The working copy under
+`datasets/math` also carries its own local git repository (branch `master`, no remote), which is where
+a change inside the folder is committed while the repository of the project keeps ignoring the folder.
+
+### 17.6 Mental shortcuts: a teaching layer on the evaluate path
+
+`lgmath/shortcuts.py` answers a different question from the rest of the folder: not whether an answer is
+right but how the same calculation is carried in the head. It is a generator of worked routes and never a
+checker. It attaches inside the record of `solver_b`, under the additive key `shortcut`, only for a
+sentence of kind `evaluate`, and it is attached after `faults.mutate_answer` so that the fault injection
+experiments still see the injected value. The hook sits in a `try` that swallows every failure of the
+layer, because a defect in a teaching aid must not be able to change a run. `decide` never reads the key:
+it looks at the two checkers of the record and at nothing else, and `tests/test_shortcut_corpus.py`
+recomputes the verdict of all 92 shortcut rows with the key removed, and again with the key replaced by a
+fabricated block, and requires the verdict to be identical. The module imports nothing from the bundle,
+only `fractions` from the standard library, which is what lets its traces be re-evaluated by a second
+implementation in the tests.
+
+**Traces.** A route is a list of steps written as s-expressions over exact rationals in a language of its
+own, `(mul 100 (sub 97 4))`, with its own parser and evaluator. `check_trace` recomputes every step and
+reports a defect when the value the step states is not the value it computes, or when a numeral has not
+been earned: allowed numerals are the place values up to `10^7` and zero, the operands of the problem,
+their digits, the values of earlier steps and their digits, and at most `MAX_HELPERS = 2` declared helper
+numerals; anything beyond a ceiling of ten times the largest magnitude in the problem is also a defect. A
+step may announce the interval its result has to land in; only five techniques do (`finger_product`,
+`tens_companion`, `square_nearest`, `deficit_base`, `partial_quotients`), the other nine promise nothing,
+and `tests/test_shortcuts.py` pins that exact set.
+
+**The catalogue, with what each route rests on.** Costs are measured on the six corpus rows of each
+technique: steps written down, and values held in the head.
+
+| Technique | Applies when | The identity it leans on | Load label | Steps, carries |
+|---|---|---|---|---|
+| `common_factor` | two products share a factor | `c(a+b) = ca + cb` | identity only | 2, 0 |
+| `multiply_by_eleven` | one factor is 11 | `11(10a+b) = 100a + 10((a+b) mod 10) + b + 100*div(a+b,10)` | digit reading | 2, 0 |
+| `nines_factor` | one factor is 9, 99 or 999 | `(10^k - 1)N = 10^k*N - N` | identity | 2, 0 |
+| `finger_product` | both factors from 6 to 10 | `ab = 10(a+b-10) + (10-a)(10-b)` | interpretation only | 3, 1 |
+| `tens_companion` | same tens digit, units adding to 10 | `(10t+u)(10t+v) = 100t(t+1) + uv` when `u+v = 10` | side condition | 3, 0 |
+| `deficit_base` | two factors near 100 | `(100-u)(100-v) = 100(100-u-v) + uv` | digit reading | 6, 3 |
+| `square_nearest` | a square, from the neighbouring ten | `x^2 = (x+d)(x-d) + d^2` | identity | 3, 0 |
+| `count_up` | a subtraction counted up over round boundaries | `(r1-b) + (r2-r1) + (a-r2) = a-b` | telescoping | 4, 0 |
+| `compensation` | a sum or difference shifted to a round number | `a+b = (a+d)+(b-d)`, `a-b = (a+d)-(b+d)` | identity only | 3, 0 |
+| `lines_product` | one digit by two digits | `(10t+u)b = ub + 10(tb)` | identity | 3, 0 |
+| `columns_product` | two factors of two digits | `(10t1+u1)(10t2+u2) = u1u2 + 10(u1t2+t1u2) + 100(t1t2)` | identity | 7, 0 |
+| `shrink_ratio` | the terms of a ratio share a divisor | `a/b = (a/g)/(b/g)` for non zero `g` | identity | 3, 0 |
+| `decimal_scale` | the bottom of a ratio is made of 2s and 5s | `a/b = (am)/(bm)` when `bm` is a power of ten | identity | 3, 0 |
+| `partial_quotients` | `div` and `mod`, taken away in blocks | `a = b*div(a,b) + mod(a,b)` with `0 <= mod(a,b) < b` | identity | 4 or 5, 0 |
+| `nines_complement` | no route of its own | `100-(10t+u) = 10(9-t) + (10-u)` | domain and last digit | none |
+| `digit_divisibility` | no route of its own | `100h+10t+u` leaves the remainder of `h+t+u` mod 9 and of `u-t+h` mod 11 | prerequisite only | none |
+
+Six load labels cover the fourteen routes that derive an answer (`digit reading`, `identity`, `identity
+only`, `interpretation only`, `side condition`, `telescoping`); the two entries without a route carry
+`domain and last digit` and `prerequisite only`, because a divisibility fact or a complement rule decides
+whether a shortcut may be used without ever computing an answer.
+
+**Routing.** Every route that applies to a sentence is built and the minimum of (steps, carries) is taken;
+the order of the catalogue only breaks a tie and across the 92 corpus rows no tie occurs, which
+`tests/test_shortcut_routing.py` asserts as an empty list of ties rather than assuming it. A route that
+would be one line restating the problem is not offered, so `count_up` is not suggested for `2000-1500`.
+The layer abstains on 8 rows, where `selected` is false and there is no route to read. "Cheapest" is a
+definition over a measured cost, not a claim that fewer written steps is always easier for a person.
+
+**The plausibility gate.** Widening the digits of the operands into place value intervals gives a range
+the result has to fall in; the gate returns the bound as exact formatted rationals, never as a float, and
+stays silent when it cannot bound (a division whose interval crosses zero, a non integer or too large
+exponent, a negative base under a power). Measured on the 92 rows, 91 carry a bound; on those, a value ten
+times too large and a value with the sign flipped are refuted on all 91 and a value ten times too small on
+86. The gate can only object: it never turns a verdict and never raises assurance, which is the behaviour
+of a checker that is present but not decisive. It does not catch an off by one, and the fault test says so
+out loud: with `solver_b:off_by_one` injected the layer reports `agrees: false` beside the wrong value
+while the arbiter still returns `VERIFIED` on the value carried by `solver_a`.
+
+**The obligations.** Each technique carries one SMT obligation: the identity above with its side conditions
+asserted and the negation of the claim expected `unsat`. All 16 come out `unsat` through
+`smt.check(..., config = "default")`, with `Int` sorts where the obligation quantifies over digits. Five
+careless readings taken from the original specification cards are satisfiable and Z3 returns a witness for
+each, and the tests compare those models against arithmetic done in Python: the slot reading of the eleven
+rule without the carry (a = 1, b = 9; 38 x 11 is 418 and the reading writes 318), `tens_companion` with the
+units left free (t = 6, u = 9, v = 3; 23 x 26 is 598 and the reading writes 618), `deficit_base` read with
+no carry (u = v = 49; 88 x 78 is 6864 and the reading writes 6664), and the nines complement in two
+variants (100-27 is 73 where the reading writes 72; 300-27 is 273 where it writes 173). The obligations are
+what the original specification cards lacked, and they are now the part of the catalogue that is checked.
+
+**Tests and data.** `tests/test_shortcuts.py` (462 tests: an independent tokenizer, parser and evaluator
+recompute every step and every announced span, the gate, the 16 obligations, the 5 refutations),
+`tests/test_shortcut_routing.py` (544 tests: cost counted from the steps actually written, determinism,
+the minimum, abstention) and `tests/test_shortcut_corpus.py` (739 tests: the 92 rows through the seven
+agents, `VERIFIED` and correct on all of them, the isolation of the verdict from the layer, the fault
+signal) together carry 1745 of the 2476 tests of the folder. `tools/shortcuts.py --generate` rewrites
+`problems/shortcuts.jsonl` and exits non zero if a row's label disagrees with what the router chooses, so
+the corpus cannot drift away from the code that produced it. What the layer deliberately does not do: add
+syntax (percentages, decimal literals, summation signs would touch both parsers, the grammars and the
+`unsupported` threshold, so the techniques that need them are not implemented) and add evidence.
+
