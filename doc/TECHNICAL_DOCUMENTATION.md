@@ -1461,7 +1461,7 @@ One arithmetic and algebra question answered by seven agents: `formalizer_a` and
 the sentence independently, `solver_a` and `solver_b` answer it, `verifier` and `adversary` judge the
 answers, and `arbiter` applies the decision rule and prints the verdict. The material sits in
 `datasets/math` as an example dataset track in the sense of section 4.3 and section 7 of `README.md`:
-80 files, self contained (`lgmath/`, `agents/`, `tools/`, `nodes/`, `problems/`, `results/`,
+81 files, self contained (`lgmath/`, `agents/`, `tools/`, `nodes/`, `problems/`, `results/`,
 `topology.json`), documented by the `README.md` inside the folder, and deliberately not re-included by
 a negation line in `.gitignore`, so the working copy stays out of the git history of this repository.
 The same content is published as a dataset split at
@@ -1559,8 +1559,10 @@ at `datasets/multilingual/tools/publish_to_hub.py` already owns it, and `tests/t
 that builder by taking the first
 `datasets/*/tools` folder that holds a file of that name: a second file of the same name under
 `datasets/math` gets imported in its place, which two of those tests noticed as a missing attribute. It
-counts the 81 files of the staged tree and the 312 corpus rows before touching the network (80 files of
-the folder plus the card that replaces its README), rewrites the folder
+counts the 82 files of the staged tree and the 312 corpus rows before touching the network (81 files of
+the folder plus the card that replaces its README; the package marker `lgmath/__init__.py` is kept even
+though it starts with underscores, because a published library without it cannot be imported as a
+package), rewrites the folder
 README into the dataset card through a list of sentence pairs in which every pair has to match (a
 silent miss would publish a card that contradicts the code beside it), appends the three hub-only
 sections, uploads a staging copy that leaves `.git`, `__pycache__` and `.pytest_cache` behind, and then
