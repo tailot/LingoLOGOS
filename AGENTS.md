@@ -10,8 +10,11 @@ Upon **any structural, architectural, algorithmic, or interface change**, the AI
 1. Promptly update `doc/TECHNICAL_DOCUMENTATION.md` to reflect the changes.
 2. Update `README.md` if the change affects system architecture, hyperparameter matrix, metrics, testing procedures, or CLI commands.
 3. Document any modified mathematical formulations, equations, or formal invariants.
+4. Do **not** document a published asset inside the repository. A dataset, model or artifact published on an external host is documented where it lives: the README of the folder that is published, which is what becomes the dataset card. The repository carries only the link in the table of published resources at the top of `README.md`, and `doc/TECHNICAL_DOCUMENTATION.md` describes the code of this repository without restating the content of an asset.
 
 > **Golden Rule**: No Pull Request or Commit modifying source files under `src/` or artifacts under `artifacts/` may be finalized without corresponding updates to the technical documentation in `doc/`.
+
+> **Asset Rule**: publishing an asset never adds a section to `doc/TECHNICAL_DOCUMENTATION.md`. It adds one row to the table of published resources in `README.md`, and the publisher tool of that folder rewrites the folder README into the card that describes the asset on the hub.
 
 ---
 
