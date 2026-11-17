@@ -9,14 +9,6 @@ Published resources of this project, with what they are:
 | https://huggingface.co/datasets/tailot/lingologos-math | Topology | math |
 | https://huggingface.co/datasets/tailot/math-stratum | Topology | stratum |
 
-The published splits are snapshots taken at a point in time. The working copies of those tracks live in
-`datasets/math` and `datasets/math-stratum`, are not tracked by git, and can move ahead of what the hub
-serves; republishing is a separate step, and the README inside each folder states which state the hub
-currently holds. The documentation of a published asset lives in that folder's README, which is what the
-publisher turns into the dataset card on the hub: this repository carries the link and nothing else. The
-other resources in this repository, the datasets under `datasets/` and the topology documents under
-`topologies/`, are example material: section 7 says what that means.
-
 ---
 
 ## 1. System Architecture
