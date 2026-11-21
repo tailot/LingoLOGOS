@@ -9,6 +9,7 @@ Published resources of this project, with what they are:
 | https://huggingface.co/datasets/tailot/lingologos-math | Topology | math |
 | https://huggingface.co/datasets/tailot/math-stratum | Topology | stratum |
 | https://huggingface.co/datasets/tailot/lingologos-geometry | Topology | geometry |
+| https://huggingface.co/datasets/tailot/lingologos-physics | Topology | physics |
 
 ---
 
