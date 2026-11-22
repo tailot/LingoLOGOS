@@ -13,7 +13,7 @@ Published resources of this project, with what they are:
 | https://huggingface.co/datasets/tailot/math-stratum | Topology | stratum |
 | https://huggingface.co/datasets/tailot/geometry-stratum | Topology | stratum |
 | https://huggingface.co/datasets/tailot/physics-stratum | Topology | stratum |
-| https://huggingface.co/datasets/tailot/stratum-stratum | Topology | stratum |
+| https://huggingface.co/datasets/tailot/struc-stratum | Topology | stratum |
 
 ---
 
