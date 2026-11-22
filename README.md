@@ -7,10 +7,13 @@ Published resources of this project, with what they are:
 | Link | Type | Category |
 | :--- | :--- | :--- |
 | https://huggingface.co/datasets/tailot/lingologos-math | Topology | math |
-| https://huggingface.co/datasets/tailot/math-stratum | Topology | stratum |
 | https://huggingface.co/datasets/tailot/lingologos-geometry | Topology | geometry |
 | https://huggingface.co/datasets/tailot/lingologos-physics | Topology | physics |
-| https://huggingface.co/datasets/tailot/struc | Topology | struc |
+| https://huggingface.co/datasets/tailot/lingologos-struc | Topology | struc |
+| https://huggingface.co/datasets/tailot/math-stratum | Topology | stratum |
+| https://huggingface.co/datasets/tailot/geometry-stratum | Topology | stratum |
+| https://huggingface.co/datasets/tailot/physics-stratum | Topology | stratum |
+| https://huggingface.co/datasets/tailot/stratum-stratum | Topology | stratum |
 
 ---
 
