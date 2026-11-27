@@ -18,7 +18,7 @@ Published resources of this project, with what they are:
 | https://huggingface.co/datasets/tailot/struc-stratum | Topology | stratum |
 | https://huggingface.co/datasets/tailot/3d2d-stratum | Topology | stratum |
 | https://huggingface.co/datasets/tailot/codex-python | Topology | programming |
-
+| https://huggingface.co/datasets/tailot/lingologos-genesis | Projection layer | math,geometry,physics,struc |
 
 ---
 
